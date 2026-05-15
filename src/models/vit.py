@@ -7,8 +7,6 @@ Architecture follows CCT (Hassani et al., 2021) for the tokenizer.
 
 from __future__ import annotations
 
-import math
-
 import torch
 import torch.nn as nn
 
@@ -18,6 +16,9 @@ N_HEADS = 6
 N_BLOCKS = 6
 MLP_RATIO = 4
 STEM_MID = 32
+INPUT_SIZE = 32    # expected H=W of input images
+STEM_STRIDE = 4    # stride-2 + stride-2 conv stem
+N_PATCHES = (INPUT_SIZE // STEM_STRIDE) ** 2  # 64 tokens = 8x8 grid
 
 
 class ConvStem(nn.Module):
@@ -35,10 +36,7 @@ class ConvStem(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (B, 3, 32, 32) -> (B, dim, 8, 8)
         x = self.layers(x)
-        B, C, H, W = x.shape
-        # (B, dim, 8, 8) -> (B, 64, dim)
         return x.flatten(2).transpose(1, 2)
 
 
@@ -93,10 +91,9 @@ class ViTSmall(nn.Module):
         n_blocks: int = N_BLOCKS,
     ) -> None:
         super().__init__()
-        n_patches = 64  # 8x8 grid from conv stem on 32x32 input
         self.stem = ConvStem(dim)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, n_patches + 1, dim))
+        self.pos_embed = nn.Parameter(torch.zeros(1, N_PATCHES + 1, dim))
         self.blocks = nn.Sequential(
             *[TransformerBlock(dim, n_heads) for _ in range(n_blocks)]
         )

@@ -4,7 +4,8 @@ Exit code 1 if ViT top-1 accuracy < 55%.
 
 Usage:
     python scripts/pilot.py [--smoke] [--arch {vit,resnet,both}]
-               [--epochs N] [--lr LR] [--batch_size B] [--device DEVICE]
+               [--epochs N] [--lr LR] [--batch_size B]
+               [--device DEVICE] [--num_workers N]
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--lr", type=float, default=None)
     p.add_argument("--batch_size", type=int, default=None)
     p.add_argument("--device", type=str, default=None)
+    p.add_argument("--num_workers", type=int, default=None)
     return p.parse_args()
 
 
@@ -51,6 +53,8 @@ def main() -> None:
         cfg.batch_size = args.batch_size
     if args.device is not None:
         cfg.device = args.device
+    if args.num_workers is not None:
+        cfg.num_workers = args.num_workers
 
     # Fall back to CPU if CUDA unavailable
     if cfg.device == "cuda" and not torch.cuda.is_available():
@@ -60,6 +64,7 @@ def main() -> None:
     print(f"=== M1 Pilot | device={cfg.device} | smoke={args.smoke} ===")
     train_loader, val_loader = get_joint_loaders(cfg)
 
+    out_dir = os.path.join(cfg.results_root, "pilot")
     results: dict[str, float] = {}
 
     if args.arch in ("vit", "both"):
@@ -67,7 +72,7 @@ def main() -> None:
         n_params = sum(p.numel() for p in model.parameters()) / 1e6
         print(f"  [vit] params: {n_params:.2f}M")
         val_accs = fit(model, train_loader, val_loader, cfg,
-                       arch_name="vit", smoke=args.smoke)
+                       arch_name="vit", out_dir=out_dir, smoke=args.smoke)
         results["vit"] = val_accs[-1]
 
     if args.arch in ("resnet", "both"):
@@ -75,7 +80,7 @@ def main() -> None:
         n_params = sum(p.numel() for p in model.parameters()) / 1e6
         print(f"  [resnet] params: {n_params:.2f}M")
         val_accs = fit(model, train_loader, val_loader, cfg,
-                       arch_name="resnet", smoke=args.smoke)
+                       arch_name="resnet", out_dir=out_dir, smoke=args.smoke)
         results["resnet"] = val_accs[-1]
 
     print("\n=== Results ===")

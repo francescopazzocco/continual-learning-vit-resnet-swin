@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import os
 from typing import List
 
@@ -15,6 +16,7 @@ from tqdm import tqdm
 from configs.default import Config
 
 SAVE_FILENAME = "{arch}_best.pt"
+LOG_FILENAME = "{arch}_train.csv"
 
 
 def train_epoch(
@@ -89,52 +91,77 @@ def fit(
     val_loader: DataLoader,
     cfg: Config,
     arch_name: str = "model",
+    out_dir: str | None = None,
     smoke: bool = False,
 ) -> List[float]:
-    """Train model for cfg.epochs with cosine LR, save best checkpoint.
+    """Train model for cfg.epochs with cosine LR, save best checkpoint and training log.
 
     Args:
         model: Model to train.
         train_loader: Training DataLoader.
         val_loader: Validation DataLoader.
         cfg: Hyperparameter config.
-        arch_name: Used for checkpoint filename and logging.
-        smoke: If True, run 1 epoch with 2 batches only.
+        arch_name: Used for checkpoint and log filenames.
+        out_dir: Directory for checkpoint and CSV log. Defaults to
+            ``{cfg.results_root}/pilot``.
+        smoke: If True, run 1 epoch with 2 batches; skip disk writes.
 
     Returns:
         List of per-epoch validation accuracies.
     """
+    if out_dir is None:
+        out_dir = os.path.join(cfg.results_root, "pilot")
+
     device = torch.device(cfg.device)
     model = model.to(device)
 
     optimizer = SGD(
-        model.parameters(), lr=cfg.lr, momentum=0.9, weight_decay=cfg.wd,
+        model.parameters(), lr=cfg.lr, momentum=cfg.momentum, weight_decay=cfg.wd,
     )
     n_epochs = 1 if smoke else cfg.epochs
     scheduler = CosineAnnealingLR(optimizer, T_max=n_epochs)
     max_batches = 2 if smoke else -1
 
-    os.makedirs(os.path.join(cfg.results_root, "pilot"), exist_ok=True)
-    ckpt_path = os.path.join(
-        cfg.results_root, "pilot", SAVE_FILENAME.format(arch=arch_name)
-    )
+    if not smoke:
+        os.makedirs(out_dir, exist_ok=True)
+    ckpt_path = os.path.join(out_dir, SAVE_FILENAME.format(arch=arch_name))
+    log_path = os.path.join(out_dir, LOG_FILENAME.format(arch=arch_name))
 
     best_acc = 0.0
     val_accs: List[float] = []
 
-    bar = tqdm(range(n_epochs), desc=f"{arch_name}", unit="epoch")
-    for epoch in bar:
-        train_loss = train_epoch(model, train_loader, optimizer, device, max_batches)
-        val_acc = eval_epoch(model, val_loader, device, max_batches)
-        scheduler.step()
+    log_file = open(log_path, "w", newline="") if not smoke else None
+    writer = csv.DictWriter(log_file, fieldnames=["epoch", "train_loss", "val_acc"]) \
+        if log_file else None
+    if writer:
+        writer.writeheader()
 
-        val_accs.append(val_acc)
-        bar.set_postfix(loss=f"{train_loss:.4f}", val=f"{val_acc:.4f}")
+    try:
+        bar = tqdm(range(n_epochs), desc=f"{arch_name}", unit="epoch")
+        for epoch in bar:
+            train_loss = train_epoch(
+                model, train_loader, optimizer, device, max_batches
+            )
+            val_acc = eval_epoch(model, val_loader, device, max_batches)
+            scheduler.step()
 
-        if val_acc > best_acc and not smoke:
-            best_acc = val_acc
-            torch.save({"epoch": epoch, "model": model.state_dict(), "acc": val_acc},
-                       ckpt_path)
+            val_accs.append(val_acc)
+            bar.set_postfix(loss=f"{train_loss:.4f}", val=f"{val_acc:.4f}")
+
+            if writer:
+                writer.writerow(
+                    {"epoch": epoch, "train_loss": train_loss, "val_acc": val_acc}
+                )
+
+            if val_acc > best_acc and not smoke:
+                best_acc = val_acc
+                torch.save(
+                    {"epoch": epoch, "model": model.state_dict(), "acc": val_acc},
+                    ckpt_path,
+                )
+    finally:
+        if log_file:
+            log_file.close()
 
     if smoke:
         print(f"  [{arch_name}] smoke val acc: {val_accs[-1]:.4f}")

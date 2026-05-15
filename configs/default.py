@@ -15,12 +15,14 @@ class Config:
     # Dataset / split
     n_tasks: int = 10
     classes_per_task: int = 10
-    n_classes: int = 100        # n_tasks * classes_per_task
+    # n_classes is derived in __post_init__; do not set manually
+    n_classes: int = field(init=False)
 
     # Training (joint pilot)
     epochs: int = 200
     batch_size: int = 128
     lr: float = 0.1
+    momentum: float = 0.9
     wd: float = 5e-4
 
     # Training (CL per-task)
@@ -44,3 +46,6 @@ class Config:
     # Augmentation
     randaug_n: int = 2
     randaug_m: int = 9
+
+    def __post_init__(self) -> None:
+        self.n_classes = self.n_tasks * self.classes_per_task
