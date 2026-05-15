@@ -1,0 +1,21 @@
+Template_final_report_ignore_untill_its_time_to_write/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Data & results
+data/
+results/
+
+# Checkpoints
+*.pt
+*.pth
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Editor
+.idea/
+.vscode/
