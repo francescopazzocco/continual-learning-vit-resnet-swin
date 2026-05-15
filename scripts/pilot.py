@@ -61,6 +61,9 @@ def main() -> None:
         print("[WARN] CUDA not available, falling back to CPU")
         cfg.device = "cpu"
 
+    torch.manual_seed(cfg.seed)
+    torch.cuda.manual_seed_all(cfg.seed)
+
     print(f"=== M1 Pilot | device={cfg.device} | smoke={args.smoke} ===")
     train_loader, val_loader = get_joint_loaders(cfg)
 
@@ -73,7 +76,7 @@ def main() -> None:
         print(f"  [vit] params: {n_params:.2f}M")
         val_accs = fit(model, train_loader, val_loader, cfg,
                        arch_name="vit", out_dir=out_dir, smoke=args.smoke)
-        results["vit"] = val_accs[-1]
+        results["vit"] = max(val_accs)
 
     if args.arch in ("resnet", "both"):
         model = get_resnet18(n_classes=cfg.n_classes)
@@ -81,7 +84,7 @@ def main() -> None:
         print(f"  [resnet] params: {n_params:.2f}M")
         val_accs = fit(model, train_loader, val_loader, cfg,
                        arch_name="resnet", out_dir=out_dir, smoke=args.smoke)
-        results["resnet"] = val_accs[-1]
+        results["resnet"] = max(val_accs)
 
     print("\n=== Results ===")
     for arch, acc in results.items():

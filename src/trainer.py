@@ -23,6 +23,7 @@ def train_epoch(
     model: nn.Module,
     loader: DataLoader,
     optimizer: torch.optim.Optimizer,
+    criterion: nn.Module,
     device: torch.device,
     max_batches: int = -1,
 ) -> float:
@@ -32,6 +33,7 @@ def train_epoch(
         model: The model to train.
         loader: Training DataLoader.
         optimizer: Optimizer.
+        criterion: Loss function.
         device: Target device.
         max_batches: If > 0, stop after this many batches (smoke mode).
 
@@ -39,7 +41,6 @@ def train_epoch(
         Mean loss over processed batches.
     """
     model.train()
-    criterion = nn.CrossEntropyLoss()
     total_loss = 0.0
     n_batches = 0
     for i, (x, y) in enumerate(loader):
@@ -115,6 +116,7 @@ def fit(
     device = torch.device(cfg.device)
     model = model.to(device)
 
+    criterion = nn.CrossEntropyLoss()
     optimizer = SGD(
         model.parameters(), lr=cfg.lr, momentum=cfg.momentum, weight_decay=cfg.wd,
     )
@@ -130,17 +132,18 @@ def fit(
     best_acc = 0.0
     val_accs: List[float] = []
 
-    log_file = open(log_path, "w", newline="") if not smoke else None
-    writer = csv.DictWriter(log_file, fieldnames=["epoch", "train_loss", "val_acc"]) \
-        if log_file else None
-    if writer:
-        writer.writeheader()
-
+    log_file = None
+    writer = None
     try:
+        if not smoke:
+            log_file = open(log_path, "w", newline="")
+            writer = csv.DictWriter(log_file, fieldnames=["epoch", "train_loss", "val_acc"])
+            writer.writeheader()
+
         bar = tqdm(range(n_epochs), desc=f"{arch_name}", unit="epoch")
         for epoch in bar:
             train_loss = train_epoch(
-                model, train_loader, optimizer, device, max_batches
+                model, train_loader, optimizer, criterion, device, max_batches
             )
             val_acc = eval_epoch(model, val_loader, device, max_batches)
             scheduler.step()
@@ -155,10 +158,12 @@ def fit(
 
             if val_acc > best_acc and not smoke:
                 best_acc = val_acc
+                tmp_path = ckpt_path + ".tmp"
                 torch.save(
                     {"epoch": epoch, "model": model.state_dict(), "acc": val_acc},
-                    ckpt_path,
+                    tmp_path,
                 )
+                os.replace(tmp_path, ckpt_path)
     finally:
         if log_file:
             log_file.close()

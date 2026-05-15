@@ -1,4 +1,6 @@
 CLAUDE.md
+Dump/
+.claude/
 Template_final_report_ignore_untill_its_time_to_write/
 
 # Python
@@ -7,8 +9,8 @@ __pycache__/
 .venv/
 
 # Data & results
-data/
-results/
+/data/
+/results/
 
 # Checkpoints
 *.pt
