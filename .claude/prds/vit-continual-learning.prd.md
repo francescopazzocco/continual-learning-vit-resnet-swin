@@ -63,13 +63,13 @@ We'll know we're right when **AA / BWT / AF results show rank ordering differenc
 ## Open Questions
 
 - [x] **Pilot accuracy gate**: ViT-Small reached 63.70% and ResNet-18 reached 63.86% on joint CIFAR-100 (2026-05-16). Gate passed; proceeding with CIFAR-100.
-- [ ] **EWC Fisher subset size**: Computing full Fisher on 5,000 images per task is feasible but slow — validate that a 20% subsample gives stable importance estimates before full runs.
-- [ ] **ER buffer size**: 200 vs. 500 exemplars per class-IL — 500 is more powerful but may dominate results; pick one before runs and justify in the report.
+- [x] **EWC Fisher subset size**: Ablation (2026-05-16, scripts/ablation_hp.py) shows all subsample fractions 0.05–0.50 give identical BWT at lambda=1000. subsample=0.2 confirmed; see doc/hyperparameter_choices.md.
+- [x] **ER buffer size**: Ablation (2026-05-16) shows 500 (5/class) delivers most of the 1000-exemplar benefit. buffer=500 confirmed; see doc/hyperparameter_choices.md.
 - [ ] **CKA implementation**: Between-task CKA requires storing layer activations — confirm memory budget on the 5070 Ti for ViT-Small with a full task's validation set.
 - [ ] **Instructor approval**: Self-proposed topic requires approval before implementation begins.
 - [ ] **Workshop submission**: If results are strong, CLVision @ CVPR is the natural venue — requires a different format than the course report; decide after seeing results.
-- [ ] **Swin architecture for 32×32**: Standard Swin-Tiny targets 224×224 inputs. Need to decide: patch size 4 (8×8 grid = 64 tokens, matches ViT), window size 4, 2 stages before spatial resolution drops too low. Validate in milestone 1b pilot.
-- [ ] **Swin layer naming for CKA/drift**: Swin has patch embedding, window-attention blocks, patch merging layers, and MLP blocks — layer type taxonomy for the mechanistic analysis needs to be defined before M3.
+- [x] **Swin architecture for 32×32**: patch=4, window=4, 2 stages, embed_dim=192, depths=[2,6]. See doc/decision_log.md LOG-001–004.
+- [x] **Swin layer naming for CKA/drift**: patch_embed, stages.0.{0,1}, patch_merging, stages.1.{0..5}, norm, head. See doc/decision_log.md LOG-005.
 
 ## Risks
 
