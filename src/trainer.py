@@ -115,6 +115,9 @@ def fit(
 
     device = torch.device(cfg.device)
     model = model.to(device)
+    if not smoke and device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+        model = torch.compile(model)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = SGD(
