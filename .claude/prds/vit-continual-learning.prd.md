@@ -12,6 +12,7 @@ A decade of continual learning (CL) research has validated methods — EWC, Expe
 - arXiv:2210.05742: ViTs have locally curved representation spaces vs. CNNs' approximately linear input-output relationship.
 - Existing ViT-CL papers (DyTox CVPR'22, LVT CVPR'22, L2P, DualPrompt, CODA-Prompt) either propose new ViT-specific architectures (DyTox, LVT) or rely on pretrained backbones (L2P, DualPrompt, CODA-Prompt) — none test whether standard CNN-era CL methods (EWC, ER) transfer to a ViT trained from scratch.
 - ViTIL (arXiv:2112.06103, 2021): naively replacing CNN with ViT in class-incremental learning degrades performance — motivation for systematic study.
+- Mirzadeh et al. "Architecture Matters in Continual Learning" (arXiv:2202.00275, ICLR 2022): compares CNNs, ResNets, WideResNets, and ViTs on Split-CIFAR-100 and ImageNet-1K from scratch. Closest prior work, but differs from this study on three axes: (1) **protocol** — they use task-incremental (multi-head, task-ID known at inference), this study uses class-incremental (single head, no task-ID at inference), a strictly harder setting with different forgetting dynamics; (2) **no mechanistic analysis** — no CKA, no weight drift; (3) **no Swin Transformer**. Their key finding (simple CNNs outperform ResNets and ViTs in forgetting) was obtained under task-IL and cannot be assumed to hold under class-IL. This study is positioned as a class-IL extension with mechanistic depth and a third architecture. Must be cited and explicitly differentiated in the report's related work section.
 
 ## Users
 
@@ -35,7 +36,7 @@ We'll know we're right when **AA / BWT / AF results show rank ordering differenc
 
 ## Scope
 
-**MVP** — Two architectures (ViT-Small from scratch with conv stem, ResNet-18) × three conditions (vanilla fine-tuning, EWC, ER) × 3 seeds on class-incremental Split-CIFAR-100 (10 tasks × 10 classes), with layer-wise CKA similarity and weight-drift analysis as the mechanistic contribution.
+**MVP** — Three architectures (ViT-Small from scratch with conv stem, ResNet-18, Swin-Tiny adapted for 32×32) × three conditions (vanilla fine-tuning, EWC, ER) × 3 seeds on class-incremental Split-CIFAR-100 (10 tasks × 10 classes) = 27 runs. Layer-wise CKA similarity and weight-drift analysis as the mechanistic contribution, now spanning a locality gradient: ResNet (fully local conv) → Swin (windowed attention) → ViT (global attention). Swin adds the critical middle point needed to test whether locality is causally responsible for forgetting resistance.
 
 **Out of scope**
 
@@ -54,8 +55,9 @@ We'll know we're right when **AA / BWT / AF results show rank ordering differenc
 | # | Milestone | Outcome | Status | Plan |
 |---|---|---|---|---|
 | 1 | Infrastructure + pilot | ViT-Small and ResNet-18 train on full CIFAR-100 (joint); confirm ViT ≥ 55% accuracy; data pipeline for Split-CIFAR-100 class-IL verified | **complete** (2026-05-16): ViT 63.70%, ResNet 63.86% — gate passed | `.claude/plans/vit-continual-learning.plan.md` |
-| 2 | CL training runs | All 18–30 runs complete (2 arch × 3 conditions × 3–5 seeds × 10 tasks); AA / BWT / AF logged per task per seed | pending | — |
-| 3 | Mechanistic analysis | CKA similarity matrices and L2 weight-drift plots produced per layer type (attention, MLP, LayerNorm, stem) after each task for both architectures | pending | — |
+| 1b | Swin-Tiny pilot | Swin-Tiny (adapted for 32×32) trains on full CIFAR-100 (joint); confirm accuracy ≥ 55%; architecture added to data pipeline | in-progress | `.claude/plans/vit-continual-learning.plan.md` |
+| 2 | CL training runs | All 27 runs complete (3 arch × 3 conditions × 3 seeds × 10 tasks); AA / BWT / AF logged per task per seed | pending | — |
+| 3 | Mechanistic analysis | CKA similarity matrices and L2 weight-drift plots produced per layer type (windowed-attn, global-attn, MLP, LayerNorm, stem/conv) after each task for all three architectures | pending | — |
 | 4 | Report | 6-page report with: intro/related work, experimental setup, quantitative results table, CKA/drift figures, discussion of ranking generalization, conclusion | pending | — |
 
 ## Open Questions
@@ -66,6 +68,8 @@ We'll know we're right when **AA / BWT / AF results show rank ordering differenc
 - [ ] **CKA implementation**: Between-task CKA requires storing layer activations — confirm memory budget on the 5070 Ti for ViT-Small with a full task's validation set.
 - [ ] **Instructor approval**: Self-proposed topic requires approval before implementation begins.
 - [ ] **Workshop submission**: If results are strong, CLVision @ CVPR is the natural venue — requires a different format than the course report; decide after seeing results.
+- [ ] **Swin architecture for 32×32**: Standard Swin-Tiny targets 224×224 inputs. Need to decide: patch size 4 (8×8 grid = 64 tokens, matches ViT), window size 4, 2 stages before spatial resolution drops too low. Validate in milestone 1b pilot.
+- [ ] **Swin layer naming for CKA/drift**: Swin has patch embedding, window-attention blocks, patch merging layers, and MLP blocks — layer type taxonomy for the mechanistic analysis needs to be defined before M3.
 
 ## Risks
 
@@ -76,6 +80,9 @@ We'll know we're right when **AA / BWT / AF results show rank ordering differenc
 | Compute budget: 30 runs × multi-hour training | Low | Medium — 5070 Ti is sufficient; 32×32 images keep run times short | Estimate: ~25–30 total GPU-hours at 32×32; run overnight |
 | Method rankings don't differ (null result) | Medium | Low — null result is publishable if well-powered and mechanistic analysis is present | Hypothesis is two-sided; confirmation of transfer is also a valid finding |
 | Conv stem complicates "pure ViT" narrative | Low | Low — well-precedented (CCT, CvT); framed explicitly as tokenizer, not backbone | One-sentence methods footnote; cite CCT |
+| Swin-Tiny fails accuracy gate on CIFAR-100 32×32 | Medium | High — standard Swin window sizes (7×7) do not fit 32×32 images; requires architectural adaptation (smaller patches, smaller windows, fewer stages) | Adapt window size to 4×4 and patch size to 4×4; validate in milestone 1b joint pilot before CL runs; fallback to Tiny ImageNet applies to all three architectures equally |
+| Swin adds scope / compute beyond course project budget | Low-Medium | Medium — 9 additional runs (~25–30% more GPU hours) | 27 runs still fits overnight on RTX 5070 Ti at 32×32; Swin-Tiny is lightweight (~28M params); course instructors reward ambition when executed cleanly |
+| Report page budget tighter with three architectures | Medium | Low — 6-page limit forces tighter writing | Combine ViT and Swin CKA figures into a single panel; keep ResNet as the CNN baseline anchor; one results table covers all three |
 
 ---
 *Status: DRAFT — requirements only. Implementation planning pending via /plan.*
