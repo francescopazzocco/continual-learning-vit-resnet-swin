@@ -24,6 +24,13 @@ INPUT_SIZE = 32
 N_PATCHES_H = INPUT_SIZE // PATCH_SIZE   # 8
 N_PATCHES_W = INPUT_SIZE // PATCH_SIZE   # 8
 
+# Standard deviation for trunc_normal_ initialization (from "Attention is All You Need")
+_INIT_STD = 0.02
+
+# Attention mask fill values: masked positions get -100 (≈ -inf for softmax), valid get 0
+_ATTN_MASK_PAD = -100.0
+_ATTN_MASK_VALID = 0.0
+
 
 def window_partition(x: torch.Tensor, ws: int) -> torch.Tensor:
     """Partition (B, H, W, C) into (B*nW, ws, ws, C) non-overlapping windows.
@@ -209,7 +216,7 @@ class SwinBlock(nn.Module):
                 label += 1
         mask_wins = window_partition(img_mask, ws).view(-1, ws * ws)
         attn_mask = mask_wins.unsqueeze(1) - mask_wins.unsqueeze(2)
-        return attn_mask.masked_fill(attn_mask != 0, -100.0)
+        return attn_mask.masked_fill(attn_mask != 0, _ATTN_MASK_PAD)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -342,14 +349,14 @@ class SwinTiny32(nn.Module):
     def _init_weights(self) -> None:
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                nn.init.trunc_normal_(m.weight, std=0.02)
+                nn.init.trunc_normal_(m.weight, std=_INIT_STD)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
             elif isinstance(m, nn.LayerNorm):
                 nn.init.ones_(m.weight)
                 nn.init.zeros_(m.bias)
             elif isinstance(m, WindowAttention):
-                nn.init.trunc_normal_(m.rel_pos_bias_table, std=0.02)
+                nn.init.trunc_normal_(m.rel_pos_bias_table, std=_INIT_STD)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.patch_embed(x)         # (B, 8, 8, 96)

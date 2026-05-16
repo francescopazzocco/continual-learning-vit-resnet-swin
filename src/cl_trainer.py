@@ -25,6 +25,25 @@ CKPT_TEMPLATE = "ckpt_task{t}.pt"
 _TRAIN_LOG_FIELDS = ["task", "epoch", "train_loss", "val_acc"]
 _METRICS_FIELDS = ["metric", "value"]
 
+# Default sentinel for "no batch limit" (used by max_batches parameter)
+_MAX_BATCHES_NO_LIMIT = -1
+
+# Number of batches per epoch in smoke mode
+_SMOKE_MAX_BATCHES = 2
+
+# Minimum value for denominators to avoid division by zero
+_MIN_DIVISOR = 1
+
+# Attention mask fill values: padded positions get -100 (≈ -inf for softmax), valid positions get 0
+_ATTN_MASK_PAD = -100.0
+_ATTN_MASK_VALID = 0.0
+
+# dtype for the per-task accuracy matrix R
+_R_MATRIX_DTYPE = np.float32
+
+# Decimal precision for metrics CSV output
+_METRICS_PRECISION = 6
+
 
 def _train_task_epoch(
     model: nn.Module,
@@ -73,7 +92,7 @@ def _train_task_epoch(
         total_loss += loss.detach()
         n_batches += 1
 
-    return (total_loss / max(n_batches, 1)).item()
+    return (total_loss / max(n_batches, _MIN_DIVISOR)).item()
 
 
 def _eval_task(
@@ -103,7 +122,7 @@ def _eval_task(
             x, y = x.to(device), y.to(device)
             correct += (model(x).argmax(dim=1) == y).sum()
             total += y.size(0)
-    return correct.item() / max(total, 1)
+    return correct.item() / max(total, _MIN_DIVISOR)
 
 
 def _write_metrics(R: np.ndarray, run_dir: str) -> None:
@@ -115,14 +134,15 @@ def _write_metrics(R: np.ndarray, run_dir: str) -> None:
     """
     m = compute_metrics(R)
     T = R.shape[0]
+    fmt = f"{{:.{_METRICS_PRECISION}f}}"
     rows: list[dict[str, str]] = [
-        {"metric": "AA",  "value": f"{m['AA']:.6f}"},
-        {"metric": "BWT", "value": f"{m['BWT']:.6f}"},
-        {"metric": "AF",  "value": f"{m['AF']:.6f}"},
+        {"metric": "AA",  "value": fmt.format(m["AA"])},
+        {"metric": "BWT", "value": fmt.format(m["BWT"])},
+        {"metric": "AF",  "value": fmt.format(m["AF"])},
     ]
     for i in range(T):
         for j in range(i + 1):
-            rows.append({"metric": f"R_{i}_{j}", "value": f"{R[i, j]:.6f}"})
+            rows.append({"metric": f"R_{i}_{j}", "value": fmt.format(R[i, j])})
 
     out_path = os.path.join(run_dir, METRICS_FILE)
     with open(out_path, "w", newline="") as f:
@@ -167,9 +187,9 @@ def run_cl(
         n_tasks = min(n_tasks, 2)
 
     n_epochs = 1 if smoke else cfg.epochs_per_task
-    max_batches = 2 if smoke else -1
+    max_batches = _SMOKE_MAX_BATCHES if smoke else _MAX_BATCHES_NO_LIMIT
 
-    R = np.zeros((n_tasks, n_tasks), dtype=np.float32)
+    R = np.zeros((n_tasks, n_tasks), dtype=_R_MATRIX_DTYPE)
 
     if not smoke:
         os.makedirs(run_dir, exist_ok=True)

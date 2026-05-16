@@ -20,6 +20,9 @@ INPUT_SIZE = 32    # expected H=W of input images
 STEM_STRIDE = 4    # stride-2 + stride-2 conv stem
 N_PATCHES = (INPUT_SIZE // STEM_STRIDE) ** 2  # 64 tokens = 8x8 grid
 
+# Standard deviation for trunc_normal_ initialization (from "Attention is All You Need")
+_INIT_STD = 0.02
+
 
 class ConvStem(nn.Module):
     """Two-stage strided conv tokenizer: 32x32 -> 8x8 grid of dim-dim tokens."""
@@ -102,11 +105,11 @@ class ViTSmall(nn.Module):
         self._init_weights()
 
     def _init_weights(self) -> None:
-        nn.init.trunc_normal_(self.pos_embed, std=0.02)
-        nn.init.trunc_normal_(self.cls_token, std=0.02)
+        nn.init.trunc_normal_(self.pos_embed, std=_INIT_STD)
+        nn.init.trunc_normal_(self.cls_token, std=_INIT_STD)
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                nn.init.trunc_normal_(m.weight, std=0.02)
+                nn.init.trunc_normal_(m.weight, std=_INIT_STD)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
             elif isinstance(m, (nn.LayerNorm, nn.BatchNorm2d)):
