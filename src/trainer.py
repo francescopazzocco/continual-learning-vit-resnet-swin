@@ -43,7 +43,7 @@ def train_epoch(
         Mean loss over processed batches.
     """
     model.train()
-    total_loss = 0.0
+    total_loss = torch.zeros(1, device=device)
     n_batches = 0
     for i, (x, y) in enumerate(loader):
         if max_batches > 0 and i >= max_batches:
@@ -54,9 +54,9 @@ def train_epoch(
             loss = criterion(model(x), y)
         loss.backward()
         optimizer.step()
-        total_loss += loss.item()
+        total_loss += loss.detach()
         n_batches += 1
-    return total_loss / max(n_batches, 1)
+    return (total_loss / max(n_batches, 1)).item()
 
 
 def eval_epoch(
@@ -77,16 +77,16 @@ def eval_epoch(
         Top-1 accuracy in [0, 1].
     """
     model.eval()
-    correct = total = 0
+    correct = torch.zeros(1, device=device, dtype=torch.long)
+    total = 0
     with torch.no_grad():
         for i, (x, y) in enumerate(loader):
             if max_batches > 0 and i >= max_batches:
                 break
             x, y = x.to(device), y.to(device)
-            preds = model(x).argmax(dim=1)
-            correct += (preds == y).sum().item()
+            correct += (model(x).argmax(dim=1) == y).sum()
             total += y.size(0)
-    return correct / max(total, 1)
+    return correct.item() / max(total, 1)
 
 
 def fit(

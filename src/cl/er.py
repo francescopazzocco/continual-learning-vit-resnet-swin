@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -57,13 +56,17 @@ class ReservoirBuffer:
             x, y = x[n_fill:], y[n_fill:]
             B -= n_fill
 
-        # Phase 2: reservoir sampling — O(1) in-place write per sample.
-        for i in range(B):
-            self._n_seen += 1
-            j = int(np.random.randint(0, self._n_seen))
-            if j < self.max_size:
-                self._x[j] = x[i]
-                self._y[j] = y[i]
+        # Phase 2: reservoir sampling — vectorised over the remaining batch.
+        if B > 0:
+            n0 = self._n_seen
+            upper = torch.arange(n0 + 1, n0 + B + 1, dtype=torch.float32)
+            slots = (torch.rand(B) * upper).long()  # slot_i ~ Uniform[0, n0+i+1)
+            keep = slots < self.max_size
+            if keep.any():
+                src = keep.nonzero(as_tuple=True)[0]
+                self._x[slots[src]] = x[src]
+                self._y[slots[src]] = y[src]
+            self._n_seen = n0 + B
 
     def sample(self, n: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Return up to n uniformly sampled exemplars as CPU tensors.

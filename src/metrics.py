@@ -31,12 +31,10 @@ def compute_metrics(R: np.ndarray) -> dict[str, float]:
     if T == 1:
         return {"AA": aa, "BWT": 0.0, "AF": 0.0}
 
-    diag = np.array([R[j, j] for j in range(T - 1)])
+    diag = np.diag(R)[:T - 1]
     bwt = float(np.mean(R[T - 1, : T - 1] - diag))
 
-    forgetting = np.array([
-        float(np.max(R[j:T, j])) - R[T - 1, j] for j in range(T - 1)
-    ])
+    forgetting = R[:T, :T - 1].max(axis=0) - R[T - 1, :T - 1]
     af = float(np.mean(forgetting))
 
     return {"AA": aa, "BWT": bwt, "AF": af}

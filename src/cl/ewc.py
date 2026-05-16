@@ -49,11 +49,12 @@ class EWC(CLMethod):
         ce = F.cross_entropy(logits, targets)
         if not self._fisher:
             return ce
-        penalty = torch.tensor(0.0, device=self.device)
-        for name, param in model.named_parameters():
-            if name in self._fisher:
-                diff = param - self._params[name]
-                penalty = penalty + (self._fisher[name] * diff.pow(2)).sum()
+        terms = [
+            (self._fisher[n] * (p - self._params[n]).pow(2)).sum()
+            for n, p in model.named_parameters()
+            if n in self._fisher
+        ]
+        penalty = torch.stack(terms).sum() if terms else ce.new_zeros(())
         return ce + (self.ewc_lambda / 2.0) * penalty
 
     def after_task(
@@ -80,7 +81,7 @@ class EWC(CLMethod):
             F.cross_entropy(model(x), y).backward()
             for name, param in model.named_parameters():
                 if param.requires_grad and param.grad is not None:
-                    task_fisher[name] += param.grad.detach().pow(2) * batch
+                    task_fisher[name] += param.grad.pow(2) * batch
             n_seen += batch
 
         for name in task_fisher:
@@ -89,9 +90,9 @@ class EWC(CLMethod):
         # Online accumulation: sum Fisher contributions across tasks.
         for name, f in task_fisher.items():
             if name in self._fisher:
-                self._fisher[name] = self._fisher[name] + f
+                self._fisher[name] += f
             else:
-                self._fisher[name] = f.clone()
+                self._fisher[name] = f
 
         for name, param in model.named_parameters():
             if param.requires_grad:
