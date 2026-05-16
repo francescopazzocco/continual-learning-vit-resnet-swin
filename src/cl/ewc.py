@@ -11,6 +11,12 @@ from src.cl.base import CLMethod
 
 _FISHER_SUBSAMPLE_MIN = 1
 
+# Divisor for EWC penalty: (lambda / 2) * sum F * (theta - theta*)^2
+_EWC_PENALTY_DIVISOR = 2.0
+
+# Minimum number of samples for Fisher normalization (avoids div by zero)
+_FISHER_MIN_SEEN = 1
+
 
 class EWC(CLMethod):
     """Online EWC: accumulates diagonal Fisher across tasks.
@@ -55,7 +61,7 @@ class EWC(CLMethod):
             if n in self._fisher
         ]
         penalty = torch.stack(terms).sum() if terms else ce.new_zeros(())
-        return ce + (self.ewc_lambda / 2.0) * penalty
+        return ce + (self.ewc_lambda / _EWC_PENALTY_DIVISOR) * penalty
 
     def after_task(
         self, task_id: int, train_loader: DataLoader, model: nn.Module
@@ -85,7 +91,7 @@ class EWC(CLMethod):
             n_seen += batch
 
         for name in task_fisher:
-            task_fisher[name] /= max(n_seen, 1)
+            task_fisher[name] /= max(n_seen, _FISHER_MIN_SEEN)
 
         # Online accumulation: sum Fisher contributions across tasks.
         for name, f in task_fisher.items():

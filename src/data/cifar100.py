@@ -13,10 +13,13 @@ from configs.default import Config
 _CIFAR100_MEAN = (0.5071, 0.4867, 0.4408)
 _CIFAR100_STD = (0.2675, 0.2565, 0.2761)
 
+# RandomCrop padding for CIFAR images (standard augmentation per paper)
+_RANDOM_CROP_PADDING = 4
+
 
 def _train_transform(cfg: Config) -> transforms.Compose:
     return transforms.Compose([
-        transforms.RandomCrop(32, padding=4),
+        transforms.RandomCrop(32, padding=_RANDOM_CROP_PADDING),
         transforms.RandomHorizontalFlip(),
         transforms.RandAugment(num_ops=cfg.randaug_n, magnitude=cfg.randaug_m),
         transforms.ToTensor(),

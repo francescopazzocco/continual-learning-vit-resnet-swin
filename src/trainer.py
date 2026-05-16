@@ -18,6 +18,18 @@ from configs.default import Config
 SAVE_FILENAME = "{arch}_best.pt"
 LOG_FILENAME = "{arch}_train.csv"
 
+# Default sentinel for "no batch limit" (used by max_batches parameter)
+_MAX_BATCHES_NO_LIMIT = -1
+
+# Number of batches per epoch in smoke mode
+_SMOKE_MAX_BATCHES = 2
+
+# Minimum value for denominators to avoid division by zero
+_MIN_DIVISOR = 1
+
+# Initial value for best accuracy tracker
+_BEST_ACC_INIT = 0.0
+
 
 def train_epoch(
     model: nn.Module,
@@ -25,7 +37,7 @@ def train_epoch(
     optimizer: torch.optim.Optimizer,
     criterion: nn.Module,
     device: torch.device,
-    max_batches: int = -1,
+    max_batches: int = _MAX_BATCHES_NO_LIMIT,
     use_amp: bool = False,
 ) -> float:
     """Run one training epoch, return mean cross-entropy loss.
@@ -56,14 +68,14 @@ def train_epoch(
         optimizer.step()
         total_loss += loss.detach()
         n_batches += 1
-    return (total_loss / max(n_batches, 1)).item()
+    return (total_loss / max(n_batches, _MIN_DIVISOR)).item()
 
 
 def eval_epoch(
     model: nn.Module,
     loader: DataLoader,
     device: torch.device,
-    max_batches: int = -1,
+    max_batches: int = _MAX_BATCHES_NO_LIMIT,
 ) -> float:
     """Evaluate model, return top-1 accuracy.
 
@@ -86,7 +98,7 @@ def eval_epoch(
             x, y = x.to(device), y.to(device)
             correct += (model(x).argmax(dim=1) == y).sum()
             total += y.size(0)
-    return correct.item() / max(total, 1)
+    return correct.item() / max(total, _MIN_DIVISOR)
 
 
 def fit(
@@ -129,14 +141,14 @@ def fit(
     )
     n_epochs = 1 if smoke else cfg.epochs
     scheduler = CosineAnnealingLR(optimizer, T_max=n_epochs)
-    max_batches = 2 if smoke else -1
+    max_batches = _SMOKE_MAX_BATCHES if smoke else _MAX_BATCHES_NO_LIMIT
 
     if not smoke:
         os.makedirs(out_dir, exist_ok=True)
     ckpt_path = os.path.join(out_dir, SAVE_FILENAME.format(arch=arch_name))
     log_path = os.path.join(out_dir, LOG_FILENAME.format(arch=arch_name))
 
-    best_acc = 0.0
+    best_acc = _BEST_ACC_INIT
     val_accs: List[float] = []
 
     log_file = None
