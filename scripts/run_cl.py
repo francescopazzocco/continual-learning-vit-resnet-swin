@@ -73,6 +73,9 @@ def main() -> None:
     if args.num_workers is not None:
         cfg.num_workers = args.num_workers
 
+    # Enable TF32 for all FP32 GEMMs (attention, MLP linears) on Blackwell tensor cores.
+    torch.set_float32_matmul_precision("high")
+
     if cfg.device == "cuda" and not torch.cuda.is_available():
         print("[WARN] CUDA not available, falling back to CPU")
         cfg.device = "cpu"

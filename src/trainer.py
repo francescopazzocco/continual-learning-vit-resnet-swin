@@ -26,7 +26,7 @@ def train_epoch(
     criterion: nn.Module,
     device: torch.device,
     max_batches: int = -1,
-    scaler: torch.amp.GradScaler | None = None,
+    use_amp: bool = False,
 ) -> float:
     """Run one training epoch, return mean cross-entropy loss.
 
@@ -37,7 +37,7 @@ def train_epoch(
         criterion: Loss function.
         device: Target device.
         max_batches: If > 0, stop after this many batches (smoke mode).
-        scaler: GradScaler for mixed-precision training; None disables AMP.
+        use_amp: If True, wrap forward in bfloat16 autocast.
 
     Returns:
         Mean loss over processed batches.
@@ -45,21 +45,15 @@ def train_epoch(
     model.train()
     total_loss = 0.0
     n_batches = 0
-    use_amp = scaler is not None
     for i, (x, y) in enumerate(loader):
         if max_batches > 0 and i >= max_batches:
             break
         x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
-        with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=use_amp):
+        with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=use_amp):
             loss = criterion(model(x), y)
-        if use_amp:
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            loss.backward()
-            optimizer.step()
+        loss.backward()
+        optimizer.step()
         total_loss += loss.item()
         n_batches += 1
     return total_loss / max(n_batches, 1)
@@ -125,7 +119,7 @@ def fit(
     device = torch.device(cfg.device)
     model = model.to(device)
     use_amp = not smoke and device.type == "cuda"
-    if use_amp:
+    if not smoke and device.type == "cuda":
         torch.backends.cudnn.benchmark = True
         model = torch.compile(model)
 
@@ -133,7 +127,6 @@ def fit(
     optimizer = SGD(
         model.parameters(), lr=cfg.lr, momentum=cfg.momentum, weight_decay=cfg.wd,
     )
-    scaler = torch.amp.GradScaler(enabled=use_amp)
     n_epochs = 1 if smoke else cfg.epochs
     scheduler = CosineAnnealingLR(optimizer, T_max=n_epochs)
     max_batches = 2 if smoke else -1
@@ -157,7 +150,7 @@ def fit(
         bar = tqdm(range(n_epochs), desc=f"{arch_name}", unit="epoch")
         for epoch in bar:
             train_loss = train_epoch(
-                model, train_loader, optimizer, criterion, device, max_batches, scaler
+                model, train_loader, optimizer, criterion, device, max_batches, use_amp
             )
             val_acc = eval_epoch(model, val_loader, device, max_batches)
             scheduler.step()
