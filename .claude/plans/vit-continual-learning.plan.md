@@ -261,7 +261,7 @@ python scripts/plot.py
 ## Acceptance
 
 - [x] M1: Both ViT and ResNet train on full CIFAR-100; smoke tests pass; accuracy gate passed
-- [ ] M1b: Swin-Tiny smoke test passes; full pilot reaches ≥55% on CIFAR-100; `swin_best.pt` written to `results/pilot/`
+- [x] M1b: Swin-Tiny smoke test passes; full pilot reaches ≥55% on CIFAR-100; `swin_best.pt` written to `results/pilot/` — 57.34% (2026-05-16)
 - [ ] M2: All 27 runs complete; each `results/runs/{run}/` has `metrics.csv` + `train_log.csv` + 10 ckpts
 - [ ] M3: `results/features/` has `cka.npz` + `drift.npz` per run; `results/figures/` populated
 - [ ] Smoke tests pass for all scripts with `--arch all` / `--arch swin`
