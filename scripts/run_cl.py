@@ -20,6 +20,7 @@ from configs.default import Config
 from src.data.cifar100 import get_split_loaders
 from src.models.vit import get_vit_small
 from src.models.resnet import get_resnet18
+from src.models.swin import get_swin_tiny
 from src.cl.base import CLMethod
 from src.cl.vanilla import Vanilla
 from src.cl.ewc import EWC
@@ -27,7 +28,7 @@ from src.cl.er import ER
 from src.cl_trainer import run_cl, METRICS_FILE
 from src.metrics import compute_metrics
 
-ARCHS = ["vit", "resnet"]
+ARCHS = ["vit", "resnet", "swin"]
 METHODS = ["vanilla", "ewc", "er"]
 SEEDS = [0, 1, 2]
 
@@ -35,6 +36,8 @@ SEEDS = [0, 1, 2]
 def _build_model(arch: str, n_classes: int) -> torch.nn.Module:
     if arch == "vit":
         return get_vit_small(n_classes=n_classes)
+    if arch == "swin":
+        return get_swin_tiny(n_classes=n_classes)
     return get_resnet18(n_classes=n_classes)
 
 
