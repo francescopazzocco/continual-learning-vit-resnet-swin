@@ -11,12 +11,15 @@ from torchvision import datasets, transforms
 from configs.default import Config
 
 _CIFAR100_MEAN = (0.5071, 0.4867, 0.4408)
-_CIFAR100_STD = (0.2675, 0.2565, 0.2761)
+_CIFAR100_STD  = (0.2675, 0.2565, 0.2761)
+
+# RandomCrop padding for CIFAR images (standard augmentation per paper)
+_RANDOM_CROP_PADDING = 4
 
 
 def _train_transform(cfg: Config) -> transforms.Compose:
     return transforms.Compose([
-        transforms.RandomCrop(32, padding=4),
+        transforms.RandomCrop(32, padding=_RANDOM_CROP_PADDING),
         transforms.RandomHorizontalFlip(),
         transforms.RandAugment(num_ops=cfg.randaug_n, magnitude=cfg.randaug_m),
         transforms.ToTensor(),
@@ -38,17 +41,19 @@ def get_joint_loaders(cfg: Config) -> Tuple[DataLoader, DataLoader]:
         root=cfg.data_root, train=True, download=True,
         transform=_train_transform(cfg),
     )
-    val_ds = datasets.CIFAR100(
+    val_ds  = datasets.CIFAR100(
         root=cfg.data_root, train=False, download=True,
         transform=_val_transform(),
     )
     train_loader = DataLoader(
         train_ds, batch_size=cfg.batch_size, shuffle=True,
         num_workers=cfg.num_workers, pin_memory=pin,
+        persistent_workers=cfg.num_workers > 0,
     )
     val_loader = DataLoader(
         val_ds, batch_size=cfg.batch_size, shuffle=False,
         num_workers=cfg.num_workers, pin_memory=pin,
+        persistent_workers=cfg.num_workers > 0,
     )
     return train_loader, val_loader
 
@@ -63,7 +68,7 @@ def get_split_loaders(cfg: Config) -> List[Tuple[DataLoader, DataLoader]]:
         root=cfg.data_root, train=True, download=True,
         transform=_train_transform(cfg),
     )
-    val_ds = datasets.CIFAR100(
+    val_ds  = datasets.CIFAR100(
         root=cfg.data_root, train=False, download=True,
         transform=_val_transform(),
     )
@@ -78,7 +83,7 @@ def get_split_loaders(cfg: Config) -> List[Tuple[DataLoader, DataLoader]]:
         hi = lo + cfg.classes_per_task
 
         train_idx = (train_targets >= lo) & (train_targets < hi)
-        val_idx = (val_targets >= lo) & (val_targets < hi)
+        val_idx   = (val_targets >= lo) & (val_targets < hi)
 
         t_loader = DataLoader(
             Subset(train_ds, train_idx.nonzero(as_tuple=True)[0].tolist()),

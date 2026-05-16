@@ -11,14 +11,17 @@ import torch
 import torch.nn as nn
 
 
-DIM = 384
-N_HEADS = 6
-N_BLOCKS = 6
-MLP_RATIO = 4
-STEM_MID = 32
-INPUT_SIZE = 32    # expected H=W of input images
-STEM_STRIDE = 4    # stride-2 + stride-2 conv stem
-N_PATCHES = (INPUT_SIZE // STEM_STRIDE) ** 2  # 64 tokens = 8x8 grid
+DIM         = 384   # ViT-Small embedding dim (ViT-B=768, ViT-S=384, ViT-T=192)
+N_HEADS     = 6     # ViT-Small standard; dim/head=64 matches ViT-B per "Attention is All You Need"
+N_BLOCKS    = 6     # ViT-Small depth (ViT-B=12, ViT-S=6, ViT-T=6)
+MLP_RATIO   = 4     # FFN expansion ratio; standard across transformer literature (4x hidden dim)
+STEM_MID    = 32    # Intermediate channels in conv stem; chosen to keep params low with 32x32 input
+INPUT_SIZE  = 32    # CIFAR-100 resolution; no preprocessing needed (unlike ImageNet 224)
+STEM_STRIDE = 4     # Combined stride of two strided convs (stride=2, stride=2) -> 32/4=8x8 token grid
+N_PATCHES   = (INPUT_SIZE // STEM_STRIDE) ** 2  # 64 tokens = 8x8 grid from 32x32 input
+
+# Standard deviation for trunc_normal_ initialization (from "Attention is All You Need")
+_INIT_STD = 0.02
 
 
 class ConvStem(nn.Module):
@@ -61,12 +64,12 @@ class TransformerBlock(nn.Module):
     def __init__(self, dim: int, n_heads: int, mlp_ratio: int = MLP_RATIO) -> None:
         super().__init__()
         self.norm1 = nn.LayerNorm(dim)
-        self.attn = nn.MultiheadAttention(dim, n_heads, batch_first=True)
+        self.attn  = nn.MultiheadAttention(dim, n_heads, batch_first=True)
         self.norm2 = nn.LayerNorm(dim)
-        self.mlp = MLP(dim, dim * mlp_ratio)
+        self.mlp   = MLP(dim, dim * mlp_ratio)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        normed = self.norm1(x)
+        normed      = self.norm1(x)
         attn_out, _ = self.attn(normed, normed, normed)
         x = x + attn_out
         x = x + self.mlp(self.norm2(x))
@@ -86,15 +89,15 @@ class ViTSmall(nn.Module):
     def __init__(
         self,
         n_classes: int = 100,
-        dim: int = DIM,
-        n_heads: int = N_HEADS,
-        n_blocks: int = N_BLOCKS,
+        dim: int       = DIM,
+        n_heads: int   = N_HEADS,
+        n_blocks: int  = N_BLOCKS,
     ) -> None:
         super().__init__()
-        self.stem = ConvStem(dim)
+        self.stem      = ConvStem(dim)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, dim))
         self.pos_embed = nn.Parameter(torch.zeros(1, N_PATCHES + 1, dim))
-        self.blocks = nn.Sequential(
+        self.blocks    = nn.Sequential(
             *[TransformerBlock(dim, n_heads) for _ in range(n_blocks)]
         )
         self.norm = nn.LayerNorm(dim)
@@ -102,11 +105,11 @@ class ViTSmall(nn.Module):
         self._init_weights()
 
     def _init_weights(self) -> None:
-        nn.init.trunc_normal_(self.pos_embed, std=0.02)
-        nn.init.trunc_normal_(self.cls_token, std=0.02)
+        nn.init.trunc_normal_(self.pos_embed, std=_INIT_STD)
+        nn.init.trunc_normal_(self.cls_token, std=_INIT_STD)
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                nn.init.trunc_normal_(m.weight, std=0.02)
+                nn.init.trunc_normal_(m.weight, std=_INIT_STD)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
             elif isinstance(m, (nn.LayerNorm, nn.BatchNorm2d)):
@@ -114,9 +117,9 @@ class ViTSmall(nn.Module):
                 nn.init.zeros_(m.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        B = x.size(0)
+        B      = x.size(0)
         tokens = self.stem(x)                               # (B, 64, dim)
-        cls = self.cls_token.expand(B, -1, -1)              # (B, 1, dim)
+        cls    = self.cls_token.expand(B, -1, -1)           # (B, 1,  dim)
         tokens = torch.cat([cls, tokens], dim=1)            # (B, 65, dim)
         tokens = tokens + self.pos_embed
         tokens = self.blocks(tokens)
