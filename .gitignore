@@ -1,6 +1,7 @@
 Dump/
 Template_final_report_ignore_untill_its_time_to_write/
 
+
 # Python
 __pycache__/
 *.py[cod]
@@ -13,6 +14,12 @@ __pycache__/
 # Checkpoints
 *.pt
 *.pth
+
+# Logs
+logs/
+
+# Research sources — binaries stay local
+doc/sources_research/
 
 # Jupyter
 .ipynb_checkpoints/
