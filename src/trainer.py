@@ -18,6 +18,18 @@ from configs.default import Config
 SAVE_FILENAME = "{arch}_best.pt"
 LOG_FILENAME = "{arch}_train.csv"
 
+# Default sentinel for "no batch limit" (used by max_batches parameter)
+_MAX_BATCHES_NO_LIMIT = -1
+
+# Number of batches per epoch in smoke mode
+_SMOKE_MAX_BATCHES    = 2
+
+# Minimum value for denominators to avoid division by zero
+_MIN_DIVISOR   = 1
+
+# Initial value for best accuracy tracker
+_BEST_ACC_INIT = 0.0
+
 
 def train_epoch(
     model: nn.Module,
@@ -25,7 +37,8 @@ def train_epoch(
     optimizer: torch.optim.Optimizer,
     criterion: nn.Module,
     device: torch.device,
-    max_batches: int = -1,
+    max_batches: int = _MAX_BATCHES_NO_LIMIT,
+    use_amp: bool = False,
 ) -> float:
     """Run one training epoch, return mean cross-entropy loss.
 
@@ -36,31 +49,33 @@ def train_epoch(
         criterion: Loss function.
         device: Target device.
         max_batches: If > 0, stop after this many batches (smoke mode).
+        use_amp: If True, wrap forward in bfloat16 autocast.
 
     Returns:
         Mean loss over processed batches.
     """
     model.train()
-    total_loss = 0.0
-    n_batches = 0
+    total_loss = torch.zeros(1, device=device)
+    n_batches  = 0
     for i, (x, y) in enumerate(loader):
         if max_batches > 0 and i >= max_batches:
             break
         x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
-        loss = criterion(model(x), y)
+        with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=use_amp):
+            loss = criterion(model(x), y)
         loss.backward()
         optimizer.step()
-        total_loss += loss.item()
-        n_batches += 1
-    return total_loss / max(n_batches, 1)
+        total_loss += loss.detach()
+        n_batches  += 1
+    return (total_loss / max(n_batches, _MIN_DIVISOR)).item()
 
 
 def eval_epoch(
     model: nn.Module,
     loader: DataLoader,
     device: torch.device,
-    max_batches: int = -1,
+    max_batches: int = _MAX_BATCHES_NO_LIMIT,
 ) -> float:
     """Evaluate model, return top-1 accuracy.
 
@@ -74,16 +89,16 @@ def eval_epoch(
         Top-1 accuracy in [0, 1].
     """
     model.eval()
-    correct = total = 0
+    correct = torch.zeros(1, device=device, dtype=torch.long)
+    total = 0
     with torch.no_grad():
         for i, (x, y) in enumerate(loader):
             if max_batches > 0 and i >= max_batches:
                 break
             x, y = x.to(device), y.to(device)
-            preds = model(x).argmax(dim=1)
-            correct += (preds == y).sum().item()
+            correct += (model(x).argmax(dim=1) == y).sum()
             total += y.size(0)
-    return correct / max(total, 1)
+    return correct.item() / max(total, _MIN_DIVISOR)
 
 
 def fit(
@@ -113,37 +128,41 @@ def fit(
     if out_dir is None:
         out_dir = os.path.join(cfg.results_root, "pilot")
 
-    device = torch.device(cfg.device)
-    model = model.to(device)
+    device  = torch.device(cfg.device)
+    model   = model.to(device)
+    use_amp = not smoke and device.type == "cuda"
+    if not smoke and device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+        model = torch.compile(model)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = SGD(
         model.parameters(), lr=cfg.lr, momentum=cfg.momentum, weight_decay=cfg.wd,
     )
-    n_epochs = 1 if smoke else cfg.epochs
-    scheduler = CosineAnnealingLR(optimizer, T_max=n_epochs)
-    max_batches = 2 if smoke else -1
+    n_epochs    = 1 if smoke else cfg.epochs
+    scheduler   = CosineAnnealingLR(optimizer, T_max=n_epochs)
+    max_batches = _SMOKE_MAX_BATCHES if smoke else _MAX_BATCHES_NO_LIMIT
 
     if not smoke:
         os.makedirs(out_dir, exist_ok=True)
     ckpt_path = os.path.join(out_dir, SAVE_FILENAME.format(arch=arch_name))
-    log_path = os.path.join(out_dir, LOG_FILENAME.format(arch=arch_name))
+    log_path  = os.path.join(out_dir, LOG_FILENAME.format(arch=arch_name))
 
-    best_acc = 0.0
+    best_acc              = _BEST_ACC_INIT
     val_accs: List[float] = []
 
     log_file = None
-    writer = None
+    writer   = None
     try:
         if not smoke:
             log_file = open(log_path, "w", newline="")
-            writer = csv.DictWriter(log_file, fieldnames=["epoch", "train_loss", "val_acc"])
+            writer   = csv.DictWriter(log_file, fieldnames=["epoch", "train_loss", "val_acc"])
             writer.writeheader()
 
         bar = tqdm(range(n_epochs), desc=f"{arch_name}", unit="epoch")
         for epoch in bar:
             train_loss = train_epoch(
-                model, train_loader, optimizer, criterion, device, max_batches
+                model, train_loader, optimizer, criterion, device, max_batches, use_amp
             )
             val_acc = eval_epoch(model, val_loader, device, max_batches)
             scheduler.step()
