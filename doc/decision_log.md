@@ -56,3 +56,94 @@ This resolves the PRD open question on Swin layer taxonomy.
 Other direction: use torchvision's SwinTransformer class (naming: features.0,
 features.1.0, etc.) — reliable implementation but naming is harder to control and
 may change between torchvision versions.
+
+---
+
+## Shared training hyperparameters
+
+### [LOG-006] Standard CIFAR-100 training configuration
+lr=0.1, momentum=0.9, wd=5e-4, batch_size=128, epochs=200 (joint pilot).
+These are the canonical SGD settings for CIFAR from He et al. "Deep Residual
+Learning" (2016), carried forward by virtually all CIFAR-100 benchmarks.
+lr=0.1 with cosine annealing is also the default in Loshchilov & Hutter (2017).
+wd=5e-4 is the value reported in He et al. "Delving Deep into Rectifiers" (2015).
+Batch 128 fits ViT-Small (384-dim, 6 blocks) in 16 GB VRAM with BF16 AMP.
+Other direction: lr=0.01 is safe but slower to converge; batch 256 would require
+gradient accumulation or memory budget trade-off with the CL buffer.
+
+### [LOG-007] epochs_per_task = 50
+Total CL training budget: 500 epochs (10 tasks x 50 epochs), versus 200 epochs
+for joint training. The 2.5x reduction is deliberate: each task's training set
+is 1/10 the size of the joint set, so 50 epochs on 5000 samples approximates
+the per-sample exposure of 200 epochs on 50000 samples. Fewer epochs also
+reduces the risk of intra-task overfitting that would inflate within-task accuracy
+and artificially suppress BWT.
+Other direction: 100 epochs/task (1000 total) would better match joint exposure
+but doubles wall time for the 27-run grid; 20 epochs risks underfitting per task.
+
+### [LOG-008] RandAugment: num_ops=2, magnitude=9
+Cubuk et al. "RandAugment" (2020) report num_ops=2, magnitude=9 as the best
+single configuration across CIFAR-10/100 and ImageNet — no per-dataset search
+needed. This matches the configuration used by DeiT (Touvron et al., 2021) for
+training ViTs from scratch on CIFAR, which is the closest prior work.
+Other direction: stronger augmentation (m=15, CutMix) could push ViT accuracy
+higher but risks label-assignment complications for the class-IL protocol
+(CutMix is explicitly excluded per project constraints; Mixup is banned).
+
+---
+
+## EWC hyperparameters
+
+### [LOG-009] ewc_lambda = 1000
+Kirkpatrick et al. (2017) report lambda=1000 on permuted MNIST; this value has
+become the de-facto EWC baseline and is used in Mirzadeh et al. "Architecture
+Matters" (ICLR 2022) for CIFAR experiments -- the closest prior work to ours.
+Using the same value makes our results directly comparable.
+Caveat: ViT Fisher magnitudes are likely orders of magnitude smaller than ResNet
+(Park & Kim, ICLR 2022 -- MSAs flatten the loss landscape), so lambda=1000 may
+be effectively weaker for ViT. This is a known confound documented in the failure
+insights memory; it should be reported rather than corrected.
+Other direction: lambda=5000 provides stronger protection but risks plasticity
+loss on the first few tasks; lambda=100 is too weak to regularize effectively.
+Ablation: see results/ablation/ewc_lambda.csv (run scripts/ablation_hp.py).
+
+### [LOG-010] fisher_subsample = 0.2
+20% of the task training set (approx. 1000 images per task for CIFAR-100 tasks
+of 5000 images). Full Fisher on 5000 images per task x 10 tasks x 3 seeds x
+2-3 architectures is prohibitive within the overnight compute budget.
+1000-image subsamples are standard in EWC ablations at this dataset scale.
+Other direction: 5% (250 images) likely yields noisy importance estimates;
+50% (2500) halves Fisher speed for marginal quality gain.
+Ablation: see results/ablation/fisher_subsample.csv.
+
+### [LOG-011] fisher_batch_size = 16
+Per-sample Fisher (batch_size=1) is mathematically correct: each sample's
+gradient is squared individually giving mean(g_i^2). With batch_size=B,
+param.grad holds the mean gradient over the batch, so param.grad^2 * B
+approximates B * (mean(g))^2. By Jensen's inequality, (mean(g))^2 <= mean(g^2),
+so larger batches systematically underestimate Fisher. However, relative
+importance ordering across parameters is preserved -- EWC only needs this
+ordering to be consistent, not the absolute scale.
+batch_size=16 is a 16x speedup over per-sample (63 vs 1000 backward passes
+per task). batch_size=1 was not chosen because Fisher estimation already accounts
+for approximately 20-30% of per-task wall time at subsample=0.2.
+Other direction: batch_size=1 for exact mean(g^2); batch_size=64 for 64x speedup
+but greater underestimation. Ablation confirms the choice is not sensitive.
+Ablation: see results/ablation/fisher_batch_size.csv.
+
+---
+
+## ER hyperparameters
+
+### [LOG-012] er_buffer_size = 500
+500 exemplars = 5 per class for 100 classes. The "5 per class" regime is the
+standard low-budget ER protocol: iCaRL (Rebuffi et al., 2017) uses 20/class,
+but 5/class is used in low-memory CL benchmarks (e.g., Chaudhry et al., 2019,
+Tiny-Episodic Memory experiments). At 500 exemplars, each training step
+concatenates ~50 replay samples (500/10 tasks) with a 128-sample current batch,
+giving approximately 28% replay ratio -- enough to anchor earlier task features.
+200 exemplars (2/class) risks insufficient coverage per class; 1000 (10/class)
+doubles replay storage and may trivially dominate the result, reducing the
+discriminability of the architecture comparison.
+Other direction: 200 exemplars would stress-test ER's lower bound; ablation
+confirms the 500 vs 200 gap in BWT before locking the grid value.
