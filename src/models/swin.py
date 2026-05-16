@@ -165,10 +165,19 @@ class SwinBlock(nn.Module):
         shift: bool,
         mlp_ratio: float,
         drop_path_rate: float,
+        input_resolution: tuple[int, int],
     ) -> None:
         super().__init__()
         self.window_size = window_size
         self.shift_size = window_size // 2 if shift else 0
+
+        H, W = input_resolution
+        actual_shift = self.shift_size if (H > window_size and W > window_size) else 0
+        if actual_shift > 0:
+            mask = self._compute_attn_mask(H, W, actual_shift, torch.device("cpu"))
+            self.register_buffer("_attn_mask", mask)
+        else:
+            self.register_buffer("_attn_mask", None)
 
         self.norm1 = nn.LayerNorm(dim)
         self.attn = WindowAttention(dim, num_heads, window_size)
@@ -200,9 +209,7 @@ class SwinBlock(nn.Module):
                 label += 1
         mask_wins = window_partition(img_mask, ws).view(-1, ws * ws)
         attn_mask = mask_wins.unsqueeze(1) - mask_wins.unsqueeze(2)
-        return attn_mask.masked_fill(attn_mask != 0, -100.0).masked_fill(
-            attn_mask == 0, 0.0
-        )
+        return attn_mask.masked_fill(attn_mask != 0, -100.0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -214,28 +221,21 @@ class SwinBlock(nn.Module):
         """
         B, H, W, C = x.shape
         ws = self.window_size
-        # When the feature map fits in one window, cyclic shift degenerates;
-        # fall back to W-MSA (matches official Swin behavior for small resolutions).
-        actual_shift = self.shift_size if (H > ws and W > ws) else 0
-
         shortcut = x
         x = self.norm1(x)
 
-        if actual_shift > 0:
-            x = torch.roll(x, shifts=(-actual_shift, -actual_shift), dims=(1, 2))
-            attn_mask = self._compute_attn_mask(H, W, actual_shift, x.device)
-        else:
-            attn_mask = None
+        if self._attn_mask is not None:
+            x = torch.roll(x, shifts=(-self.shift_size, -self.shift_size), dims=(1, 2))
 
         assert H % ws == 0 and W % ws == 0, (
             f"Feature map ({H}x{W}) not divisible by window size ({ws})"
         )
         x_wins = window_partition(x, ws).view(-1, ws * ws, C)
-        x_wins = self.attn(x_wins, mask=attn_mask).view(-1, ws, ws, C)
+        x_wins = self.attn(x_wins, mask=self._attn_mask).view(-1, ws, ws, C)
         x = window_reverse(x_wins, ws, H, W)
 
-        if actual_shift > 0:
-            x = torch.roll(x, shifts=(actual_shift, actual_shift), dims=(1, 2))
+        if self._attn_mask is not None:
+            x = torch.roll(x, shifts=(self.shift_size, self.shift_size), dims=(1, 2))
 
         x = shortcut + self.drop_path(x)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
@@ -310,10 +310,14 @@ class SwinTiny32(nn.Module):
             DROP_PATH_RATE * i / max(total_blocks - 1, 1) for i in range(total_blocks)
         ]
 
+        stage_resolutions = [
+            (N_PATCHES_H, N_PATCHES_W),
+            (N_PATCHES_H // 2, N_PATCHES_W // 2),
+        ]
         self.stages: nn.ModuleList = nn.ModuleList()
         block_idx = 0
         for stage_idx, (depth, n_heads) in enumerate(zip(DEPTHS, NUM_HEADS)):
-            dim = EMBED_DIM * (2 ** stage_idx)   # 96 for stage 0, 192 for stage 1
+            dim = EMBED_DIM * (2 ** stage_idx)   # 192 for stage 0, 384 for stage 1
             stage = nn.ModuleList([
                 SwinBlock(
                     dim=dim,
@@ -322,6 +326,7 @@ class SwinTiny32(nn.Module):
                     shift=(i % 2 == 1),
                     mlp_ratio=MLP_RATIO,
                     drop_path_rate=dp_rates[block_idx + i],
+                    input_resolution=stage_resolutions[stage_idx],
                 )
                 for i in range(depth)
             ])
