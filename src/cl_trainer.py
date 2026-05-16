@@ -53,6 +53,7 @@ def _train_task_epoch(
     device: torch.device,
     max_batches: int,
     use_amp: bool,
+    grad_clip: float = 0.0,
 ) -> float:
     """Train one epoch for a single CL task; return mean batch loss.
 
@@ -84,6 +85,8 @@ def _train_task_epoch(
             logits = model(x_aug)
             loss   = method.loss(logits, y_aug, model)
         loss.backward()
+        if grad_clip > 0.0:
+            nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
 
         # Pass original (pre-replay) CPU batch so ER can update its buffer.
@@ -223,7 +226,8 @@ def run_cl(
             )
             for epoch in bar:
                 train_loss = _train_task_epoch(
-                    model, train_loader, optimizer, method, device, max_batches, use_amp
+                    model, train_loader, optimizer, method, device, max_batches, use_amp,
+                    grad_clip=cfg.grad_clip,
                 )
                 val_acc = _eval_task(model, val_loader, device, max_batches)
                 scheduler.step()

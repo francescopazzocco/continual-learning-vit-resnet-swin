@@ -43,6 +43,7 @@ class Config:
     # Runtime
     device:      str = "cuda"   # Default to GPU; fallback to "cpu" if unavailable
     num_workers: int = 4        # DataLoader parallelism; change according to hardware specs
+    grad_clip:   float = 1.0    # Max gradient norm; required for ViT stability, especially under EWC penalty
 
     # Augmentation
     randaug_n: int = 2          # RandAugment num_ops=2 (Cubuk et al., 2020 standard)
