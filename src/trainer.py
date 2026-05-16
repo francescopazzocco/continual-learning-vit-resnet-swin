@@ -22,10 +22,10 @@ LOG_FILENAME = "{arch}_train.csv"
 _MAX_BATCHES_NO_LIMIT = -1
 
 # Number of batches per epoch in smoke mode
-_SMOKE_MAX_BATCHES = 2
+_SMOKE_MAX_BATCHES    = 2
 
 # Minimum value for denominators to avoid division by zero
-_MIN_DIVISOR = 1
+_MIN_DIVISOR   = 1
 
 # Initial value for best accuracy tracker
 _BEST_ACC_INIT = 0.0
@@ -56,7 +56,7 @@ def train_epoch(
     """
     model.train()
     total_loss = torch.zeros(1, device=device)
-    n_batches = 0
+    n_batches  = 0
     for i, (x, y) in enumerate(loader):
         if max_batches > 0 and i >= max_batches:
             break
@@ -67,7 +67,7 @@ def train_epoch(
         loss.backward()
         optimizer.step()
         total_loss += loss.detach()
-        n_batches += 1
+        n_batches  += 1
     return (total_loss / max(n_batches, _MIN_DIVISOR)).item()
 
 
@@ -128,8 +128,8 @@ def fit(
     if out_dir is None:
         out_dir = os.path.join(cfg.results_root, "pilot")
 
-    device = torch.device(cfg.device)
-    model = model.to(device)
+    device  = torch.device(cfg.device)
+    model   = model.to(device)
     use_amp = not smoke and device.type == "cuda"
     if not smoke and device.type == "cuda":
         torch.backends.cudnn.benchmark = True
@@ -139,24 +139,24 @@ def fit(
     optimizer = SGD(
         model.parameters(), lr=cfg.lr, momentum=cfg.momentum, weight_decay=cfg.wd,
     )
-    n_epochs = 1 if smoke else cfg.epochs
-    scheduler = CosineAnnealingLR(optimizer, T_max=n_epochs)
+    n_epochs    = 1 if smoke else cfg.epochs
+    scheduler   = CosineAnnealingLR(optimizer, T_max=n_epochs)
     max_batches = _SMOKE_MAX_BATCHES if smoke else _MAX_BATCHES_NO_LIMIT
 
     if not smoke:
         os.makedirs(out_dir, exist_ok=True)
     ckpt_path = os.path.join(out_dir, SAVE_FILENAME.format(arch=arch_name))
-    log_path = os.path.join(out_dir, LOG_FILENAME.format(arch=arch_name))
+    log_path  = os.path.join(out_dir, LOG_FILENAME.format(arch=arch_name))
 
-    best_acc = _BEST_ACC_INIT
+    best_acc              = _BEST_ACC_INIT
     val_accs: List[float] = []
 
     log_file = None
-    writer = None
+    writer   = None
     try:
         if not smoke:
             log_file = open(log_path, "w", newline="")
-            writer = csv.DictWriter(log_file, fieldnames=["epoch", "train_loss", "val_acc"])
+            writer   = csv.DictWriter(log_file, fieldnames=["epoch", "train_loss", "val_acc"])
             writer.writeheader()
 
         bar = tqdm(range(n_epochs), desc=f"{arch_name}", unit="epoch")

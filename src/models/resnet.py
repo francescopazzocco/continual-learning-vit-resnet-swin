@@ -1,4 +1,4 @@
-"""ResNet-18 wrapper — no pretrained weights, head replaced for n_classes."""
+"""ResNet-18 wrapper -- no pretrained weights, head replaced for n_classes."""
 
 from __future__ import annotations
 
@@ -19,6 +19,6 @@ def get_resnet18(n_classes: int = 100) -> nn.Module:
     Returns:
         ResNet-18 with fc replaced by Linear(_RESNET18_FC_IN, n_classes).
     """
-    model = resnet18(weights=None)
+    model    = resnet18(weights=None)
     model.fc = nn.Linear(_RESNET18_FC_IN, n_classes)
     return model

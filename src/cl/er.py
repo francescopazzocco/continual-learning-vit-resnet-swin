@@ -24,10 +24,11 @@ class ReservoirBuffer:
     """
 
     def __init__(self, max_size: int) -> None:
-        self.max_size = max_size
+
         self._x: torch.Tensor | None = None
         self._y: torch.Tensor | None = None
-        self._size: int = 0    # valid entries in [0, _size)
+        self.max_size     = max_size
+        self._size:   int = 0    # valid entries in [0, _size)
         self._n_seen: int = 0
 
     def update(self, x: torch.Tensor, y: torch.Tensor) -> None:
@@ -38,7 +39,7 @@ class ReservoirBuffer:
             y: Target batch on CPU (1-D integer labels).
         """
         x, y = x.cpu(), y.cpu()
-        B = x.size(0)
+        B    = x.size(0)
 
         # Lazy init: allocate fixed-size storage from the first batch's shape.
         if self._x is None:
@@ -51,17 +52,17 @@ class ReservoirBuffer:
         if n_fill > 0:
             self._x[self._size : self._size + n_fill] = x[:n_fill]
             self._y[self._size : self._size + n_fill] = y[:n_fill]
-            self._size += n_fill
+            self._size   += n_fill
             self._n_seen += n_fill
-            x, y = x[n_fill:], y[n_fill:]
-            B -= n_fill
+            x, y  = x[n_fill:], y[n_fill:]
+            B    -= n_fill
 
-        # Phase 2: reservoir sampling — vectorised over the remaining batch.
+        # Phase 2: reservoir sampling -- vectorised over the remaining batch.
         if B > 0:
-            n0 = self._n_seen
+            n0    = self._n_seen
             upper = torch.arange(n0 + 1, n0 + B + 1, dtype=torch.float32)
             slots = (torch.rand(B) * upper).long()  # slot_i ~ Uniform[0, n0+i+1)
-            keep = slots < self.max_size
+            keep  = slots < self.max_size
             if keep.any():
                 src = keep.nonzero(as_tuple=True)[0]
                 self._x[slots[src]] = x[src]
@@ -79,7 +80,7 @@ class ReservoirBuffer:
         """
         if self._size == 0:
             return _EMPTY, _EMPTY
-        n = min(n, self._size)
+        n   = min(n, self._size)
         idx = torch.randperm(self._size)[:n]
         return self._x[idx], self._y[idx]
 

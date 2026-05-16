@@ -19,27 +19,27 @@ from src.cl.base import CLMethod
 from src.metrics import compute_metrics
 
 TRAIN_LOG_FILE = "train_log.csv"
-METRICS_FILE = "metrics.csv"
-CKPT_TEMPLATE = "ckpt_task{t}.pt"
+METRICS_FILE   = "metrics.csv"
+CKPT_TEMPLATE  = "ckpt_task{t}.pt"
 
 _TRAIN_LOG_FIELDS = ["task", "epoch", "train_loss", "val_acc"]
-_METRICS_FIELDS = ["metric", "value"]
+_METRICS_FIELDS   = ["metric", "value"]
 
 # Default sentinel for "no batch limit" (used by max_batches parameter)
 _MAX_BATCHES_NO_LIMIT = -1
 
 # Number of batches per epoch in smoke mode
-_SMOKE_MAX_BATCHES = 2
+_SMOKE_MAX_BATCHES    = 2
 
 # Minimum value for denominators to avoid division by zero
-_MIN_DIVISOR = 1
+_MIN_DIVISOR          = 1
 
-# Attention mask fill values: padded positions get -100 (≈ -inf for softmax), valid positions get 0
-_ATTN_MASK_PAD = -100.0
+# Attention mask fill values: padded positions get -100 (~ -inf for softmax), valid positions get 0
+_ATTN_MASK_PAD   = -100.0
 _ATTN_MASK_VALID = 0.0
 
 # dtype for the per-task accuracy matrix R
-_R_MATRIX_DTYPE = np.float32
+_R_MATRIX_DTYPE  = np.float32
 
 # Decimal precision for metrics CSV output
 _METRICS_PRECISION = 6
@@ -70,19 +70,19 @@ def _train_task_epoch(
     """
     model.train()
     total_loss = torch.zeros(1, device=device)
-    n_batches = 0
+    n_batches  = 0
 
     for i, (x, y) in enumerate(loader):
         if max_batches > 0 and i >= max_batches:
             break
 
         x_orig, y_orig = x.to(device), y.to(device)
-        x_aug, y_aug = method.prepare_batch(x_orig, y_orig, device)
+        x_aug, y_aug   = method.prepare_batch(x_orig, y_orig, device)
 
         optimizer.zero_grad()
         with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=use_amp):
             logits = model(x_aug)
-            loss = method.loss(logits, y_aug, model)
+            loss   = method.loss(logits, y_aug, model)
         loss.backward()
         optimizer.step()
 
@@ -90,7 +90,7 @@ def _train_task_epoch(
         method.after_step(x, y)
 
         total_loss += loss.detach()
-        n_batches += 1
+        n_batches  += 1
 
     return (total_loss / max(n_batches, _MIN_DIVISOR)).item()
 
@@ -114,14 +114,14 @@ def _eval_task(
     """
     model.eval()
     correct = torch.zeros(1, device=device, dtype=torch.long)
-    total = 0
+    total   = 0
     with torch.no_grad():
         for i, (x, y) in enumerate(loader):
             if max_batches > 0 and i >= max_batches:
                 break
-            x, y = x.to(device), y.to(device)
+            x, y     = x.to(device), y.to(device)
             correct += (model(x).argmax(dim=1) == y).sum()
-            total += y.size(0)
+            total   += y.size(0)
     return correct.item() / max(total, _MIN_DIVISOR)
 
 
@@ -132,8 +132,8 @@ def _write_metrics(R: np.ndarray, run_dir: str) -> None:
         R: Accuracy matrix of shape (n_tasks, n_tasks).
         run_dir: Destination directory.
     """
-    m = compute_metrics(R)
-    T = R.shape[0]
+    m   = compute_metrics(R)
+    T   = R.shape[0]
     fmt = f"{{:.{_METRICS_PRECISION}f}}"
     rows: list[dict[str, str]] = [
         {"metric": "AA",  "value": fmt.format(m["AA"])},
@@ -174,8 +174,8 @@ def run_cl(
         R: float32 ndarray of shape (n_tasks, n_tasks).
            R[i, j] = accuracy on task j after training task i (j <= i).
     """
-    device = torch.device(cfg.device)
-    model = model.to(device)
+    device  = torch.device(cfg.device)
+    model   = model.to(device)
 
     use_amp = not smoke and device.type == "cuda"
     if not smoke and device.type == "cuda":
@@ -186,7 +186,7 @@ def run_cl(
     if smoke:
         n_tasks = min(n_tasks, 2)
 
-    n_epochs = 1 if smoke else cfg.epochs_per_task
+    n_epochs    = 1 if smoke else cfg.epochs_per_task
     max_batches = _SMOKE_MAX_BATCHES if smoke else _MAX_BATCHES_NO_LIMIT
 
     R = np.zeros((n_tasks, n_tasks), dtype=_R_MATRIX_DTYPE)
@@ -194,12 +194,12 @@ def run_cl(
     if not smoke:
         os.makedirs(run_dir, exist_ok=True)
 
-    log_file = None
+    log_file   = None
     log_writer = None
     try:
         if not smoke:
-            log_path = os.path.join(run_dir, TRAIN_LOG_FILE)
-            log_file = open(log_path, "w", newline="")
+            log_path   = os.path.join(run_dir, TRAIN_LOG_FILE)
+            log_file   = open(log_path, "w", newline="")
             log_writer = csv.DictWriter(log_file, fieldnames=_TRAIN_LOG_FIELDS)
             log_writer.writeheader()
 
