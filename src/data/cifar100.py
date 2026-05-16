@@ -45,10 +45,12 @@ def get_joint_loaders(cfg: Config) -> Tuple[DataLoader, DataLoader]:
     train_loader = DataLoader(
         train_ds, batch_size=cfg.batch_size, shuffle=True,
         num_workers=cfg.num_workers, pin_memory=pin,
+        persistent_workers=cfg.num_workers > 0,
     )
     val_loader = DataLoader(
         val_ds, batch_size=cfg.batch_size, shuffle=False,
         num_workers=cfg.num_workers, pin_memory=pin,
+        persistent_workers=cfg.num_workers > 0,
     )
     return train_loader, val_loader
 
@@ -84,11 +86,13 @@ def get_split_loaders(cfg: Config) -> List[Tuple[DataLoader, DataLoader]]:
             Subset(train_ds, train_idx.nonzero(as_tuple=True)[0].tolist()),
             batch_size=cfg.batch_size, shuffle=True,
             num_workers=cfg.num_workers, pin_memory=pin,
+            persistent_workers=cfg.num_workers > 0,
         )
         v_loader = DataLoader(
             Subset(val_ds, val_idx.nonzero(as_tuple=True)[0].tolist()),
             batch_size=cfg.batch_size, shuffle=False,
             num_workers=cfg.num_workers, pin_memory=pin,
+            persistent_workers=cfg.num_workers > 0,
         )
         splits.append((t_loader, v_loader))
 

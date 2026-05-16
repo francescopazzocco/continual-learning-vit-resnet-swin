@@ -16,7 +16,9 @@ _EMPTY: torch.Tensor = torch.empty(0)
 class ReservoirBuffer:
     """Fixed-size exemplar buffer using reservoir sampling.
 
-    Maintains a uniform random sample over all samples seen so far.
+    Pre-allocates storage on the first update call to avoid repeated torch.cat
+    reallocations. The fill phase is vectorized; the reservoir phase uses an
+    O(1) in-place slot assignment instead of a copy-and-extend.
 
     Args:
         max_size: Maximum number of exemplars to store.
@@ -26,6 +28,7 @@ class ReservoirBuffer:
         self.max_size = max_size
         self._x: torch.Tensor | None = None
         self._y: torch.Tensor | None = None
+        self._size: int = 0    # valid entries in [0, _size)
         self._n_seen: int = 0
 
     def update(self, x: torch.Tensor, y: torch.Tensor) -> None:
@@ -35,39 +38,50 @@ class ReservoirBuffer:
             x: Input batch on CPU.
             y: Target batch on CPU (1-D integer labels).
         """
-        for i in range(x.size(0)):
+        x, y = x.cpu(), y.cpu()
+        B = x.size(0)
+
+        # Lazy init: allocate fixed-size storage from the first batch's shape.
+        if self._x is None:
+            self._x = torch.empty((self.max_size, *x.shape[1:]), dtype=x.dtype)
+            self._y = torch.empty(self.max_size, dtype=y.dtype)
+
+        # Phase 1: fill empty slots with a single vectorized slice write.
+        n_free = self.max_size - self._size
+        n_fill = min(n_free, B)
+        if n_fill > 0:
+            self._x[self._size : self._size + n_fill] = x[:n_fill]
+            self._y[self._size : self._size + n_fill] = y[:n_fill]
+            self._size += n_fill
+            self._n_seen += n_fill
+            x, y = x[n_fill:], y[n_fill:]
+            B -= n_fill
+
+        # Phase 2: reservoir sampling — O(1) in-place write per sample.
+        for i in range(B):
             self._n_seen += 1
-            xi, yi = x[i : i + 1], y[i : i + 1]
-            if self._x is None:
-                self._x = xi.clone()
-                self._y = yi.clone()
-            elif len(self._x) < self.max_size:
-                self._x = torch.cat([self._x, xi], dim=0)
-                self._y = torch.cat([self._y, yi], dim=0)
-            else:
-                # Replace a random slot with probability max_size / n_seen.
-                j = int(np.random.randint(0, self._n_seen))
-                if j < self.max_size:
-                    self._x[j] = xi[0]
-                    self._y[j] = yi[0]
+            j = int(np.random.randint(0, self._n_seen))
+            if j < self.max_size:
+                self._x[j] = x[i]
+                self._y[j] = y[i]
 
     def sample(self, n: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Return up to n uniformly sampled exemplars as CPU tensors.
 
         Args:
-            n: Number of samples requested; capped at buffer size.
+            n: Number of samples requested; capped at buffer fill level.
 
         Returns:
-            (x, y) pair; both empty if the buffer is empty.
+            (x, y) pair; both empty if the buffer has no valid entries.
         """
-        if self._x is None or len(self._x) == 0:
+        if self._size == 0:
             return _EMPTY, _EMPTY
-        n = min(n, len(self._x))
-        idx = torch.randperm(len(self._x))[:n]
+        n = min(n, self._size)
+        idx = torch.randperm(self._size)[:n]
         return self._x[idx], self._y[idx]
 
     def __len__(self) -> int:
-        return len(self._x) if self._x is not None else 0
+        return self._size
 
 
 class ER(CLMethod):

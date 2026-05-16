@@ -33,7 +33,7 @@ def _train_task_epoch(
     method: CLMethod,
     device: torch.device,
     max_batches: int,
-    scaler: torch.amp.GradScaler,
+    use_amp: bool,
 ) -> float:
     """Train one epoch for a single CL task; return mean batch loss.
 
@@ -44,7 +44,7 @@ def _train_task_epoch(
         method: CLMethod providing prepare_batch, loss, and after_step hooks.
         device: Training device.
         max_batches: Stop after this many batches when > 0 (smoke mode).
-        scaler: GradScaler; AMP is disabled when scaler is None.
+        use_amp: If True, wrap forward in bfloat16 autocast.
 
     Returns:
         Mean cross-entropy loss over processed batches.
@@ -52,7 +52,6 @@ def _train_task_epoch(
     model.train()
     total_loss = 0.0
     n_batches = 0
-    use_amp = scaler is not None
 
     for i, (x, y) in enumerate(loader):
         if max_batches > 0 and i >= max_batches:
@@ -62,17 +61,11 @@ def _train_task_epoch(
         x_aug, y_aug = method.prepare_batch(x_orig, y_orig, device)
 
         optimizer.zero_grad()
-        with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=use_amp):
+        with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=use_amp):
             logits = model(x_aug)
             loss = method.loss(logits, y_aug, model)
-
-        if use_amp:
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            loss.backward()
-            optimizer.step()
+        loss.backward()
+        optimizer.step()
 
         # Pass original (pre-replay) batch so ER can update its buffer.
         method.after_step(x.cpu(), y.cpu())
@@ -164,7 +157,9 @@ def run_cl(
     model = model.to(device)
 
     use_amp = not smoke and device.type == "cuda"
-    scaler = torch.amp.GradScaler(enabled=use_amp)
+    if not smoke and device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+        model = torch.compile(model)
 
     n_tasks = min(len(splits), cfg.n_tasks)
     if smoke:
@@ -207,7 +202,7 @@ def run_cl(
             )
             for epoch in bar:
                 train_loss = _train_task_epoch(
-                    model, train_loader, optimizer, method, device, max_batches, scaler
+                    model, train_loader, optimizer, method, device, max_batches, use_amp
                 )
                 val_acc = _eval_task(model, val_loader, device, max_batches)
                 scheduler.step()
