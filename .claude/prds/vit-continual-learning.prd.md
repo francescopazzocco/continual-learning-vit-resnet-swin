@@ -2,13 +2,13 @@
 
 ## Problem
 
-A decade of continual learning (CL) research has validated methods — EWC, Experience Replay, and their variants — almost exclusively on CNN backbones (ResNet-18 in 62/81 approaches surveyed by arXiv:2501.04897). Vision Transformers are now the default backbone in industry and state-of-the-art vision systems, yet the implicit assumption that CL findings transfer across architectures is untested. ViTs differ structurally from CNNs in ways that directly affect how and where task-specific features are stored: global self-attention from the first block, more entangled cross-layer representations (Park & Kim, ICLR 2022), and curved representation geometry (arXiv:2210.05742). If method rankings shift when the backbone changes, practitioners deploying CL on ViT-based systems are operating on invalidated assumptions.
+A decade of continual learning (CL) research has validated methods — EWC, Experience Replay, and their variants — almost exclusively on CNN backbones (ResNet-18 in 62/81 online CL approaches surveyed by arXiv:2501.04897; ResNet-18 is similarly the de-facto backbone across broader CL benchmarks following Van de Ven et al. 2022). Vision Transformers are now the default backbone in industry and state-of-the-art vision systems, yet the implicit assumption that CL findings transfer across architectures is untested. ViTs differ structurally from CNNs in ways that directly affect how and where task-specific features are stored: global self-attention from the first block, qualitatively different feature reuse across layers (Park & Kim, ICLR 2022), and curved representation geometry (arXiv:2210.05742). If method rankings shift when the backbone changes, practitioners deploying CL on ViT-based systems are operating on invalidated assumptions.
 
 ## Evidence
 
-- arXiv:2501.04897 (2025): systematic survey of 81 CL approaches — ResNet-18 appears in 62/81; no comparable ViT-from-scratch study exists.
-- Van de Ven & Tolias (Nature MI, 2022; arXiv:1904.07734): the standard CL benchmark paper uses ResNets throughout.
-- Park & Kim (ICLR 2022): MSAs act as low-pass filters, flatten loss landscapes, and produce more entangled cross-layer representations vs. CNNs — structural reasons to expect different forgetting dynamics.
+- arXiv:2501.04897 (2025): systematic survey of 81 online CL approaches — ResNet-18 appears in 62/81; no comparable ViT-from-scratch study exists. Scope is online (single-pass) CL; ResNet-18 dominance is consistent with the broader CL literature.
+- Van de Ven, Tuytelaars & Tolias (Nature MI, 2022; arXiv:1904.07734): the canonical CL scenario taxonomy; benchmark protocols (Split-CIFAR-100 class-IL) widely adopted by the community with ResNet-18 backbones.
+- Park & Kim (ICLR 2022): MSAs act as low-pass filters, flatten loss landscapes, and produce qualitatively different cross-layer feature reuse vs. CNNs — structural reasons to expect different forgetting dynamics.
 - arXiv:2210.05742: ViTs have locally curved representation spaces vs. CNNs' approximately linear input-output relationship.
 - Existing ViT-CL papers (DyTox CVPR'22, LVT CVPR'22, L2P, DualPrompt, CODA-Prompt) either propose new ViT-specific architectures (DyTox, LVT) or rely on pretrained backbones (L2P, DualPrompt, CODA-Prompt) — none test whether standard CNN-era CL methods (EWC, ER) transfer to a ViT trained from scratch.
 - ViTIL (arXiv:2112.06103, 2021): naively replacing CNN with ViT in class-incremental learning degrades performance — motivation for systematic study.
@@ -53,14 +53,14 @@ We'll know we're right when **AA / BWT / AF results show rank ordering differenc
 
 | # | Milestone | Outcome | Status | Plan |
 |---|---|---|---|---|
-| 1 | Infrastructure + pilot | ViT-Small and ResNet-18 train on full CIFAR-100 (joint); confirm ViT ≥ 55% accuracy; data pipeline for Split-CIFAR-100 class-IL verified | in-progress | `.claude/plans/vit-continual-learning.plan.md` |
+| 1 | Infrastructure + pilot | ViT-Small and ResNet-18 train on full CIFAR-100 (joint); confirm ViT ≥ 55% accuracy; data pipeline for Split-CIFAR-100 class-IL verified | **complete** (2026-05-16): ViT 63.70%, ResNet 63.86% — gate passed | `.claude/plans/vit-continual-learning.plan.md` |
 | 2 | CL training runs | All 18–30 runs complete (2 arch × 3 conditions × 3–5 seeds × 10 tasks); AA / BWT / AF logged per task per seed | pending | — |
 | 3 | Mechanistic analysis | CKA similarity matrices and L2 weight-drift plots produced per layer type (attention, MLP, LayerNorm, stem) after each task for both architectures | pending | — |
 | 4 | Report | 6-page report with: intro/related work, experimental setup, quantitative results table, CKA/drift figures, discussion of ranking generalization, conclusion | pending | — |
 
 ## Open Questions
 
-- [ ] **Pilot accuracy gate**: Does ViT-Small with conv stem + RandAugment + Mixup reach ≥ 55% on joint CIFAR-100? If not, switch to Tiny ImageNet before committing to CL runs.
+- [x] **Pilot accuracy gate**: ViT-Small reached 63.70% and ResNet-18 reached 63.86% on joint CIFAR-100 (2026-05-16). Gate passed; proceeding with CIFAR-100.
 - [ ] **EWC Fisher subset size**: Computing full Fisher on 5,000 images per task is feasible but slow — validate that a 20% subsample gives stable importance estimates before full runs.
 - [ ] **ER buffer size**: 200 vs. 500 exemplars per class-IL — 500 is more powerful but may dominate results; pick one before runs and justify in the report.
 - [ ] **CKA implementation**: Between-task CKA requires storing layer activations — confirm memory budget on the 5070 Ti for ViT-Small with a full task's validation set.

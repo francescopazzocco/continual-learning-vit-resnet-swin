@@ -1,0 +1,18 @@
+=== M1 Pilot Results | 2026-05-16 ===
+
+Device : cuda (RTX 5070 Ti)
+Dataset: CIFAR-100 (joint, 100 classes)
+Epochs : 200
+
+  vit    | params: 10.82M | best val acc: 63.70% | time: ~49 min
+  resnet | params: 11.23M | best val acc: 63.86% | time: ~9 min
+
+Checkpoints:
+  results/pilot/vit_best.pt
+  results/pilot/resnet_best.pt
+
+Training curves:
+  results/pilot/vit_train.csv
+  results/pilot/resnet_train.csv
+
+Accuracy gate (>= 55%): [OK] PASSED -> proceed to M2
