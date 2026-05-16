@@ -45,6 +45,7 @@ def _build_method(method_name: str, cfg: Config, device: torch.device) -> CLMeth
         return EWC(
             ewc_lambda=cfg.ewc_lambda,
             fisher_subsample=cfg.fisher_subsample,
+            fisher_batch_size=cfg.fisher_batch_size,
             device=device,
         )
     if method_name == "er":

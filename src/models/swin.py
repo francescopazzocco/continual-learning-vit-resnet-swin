@@ -12,14 +12,14 @@ import torch
 import torch.nn as nn
 
 
-EMBED_DIM = 192
-DEPTHS = [2, 6]
-NUM_HEADS = [6, 12]
-WINDOW_SIZE = 4
-PATCH_SIZE = 4
-MLP_RATIO = 4.0
-DROP_PATH_RATE = 0.1
-INPUT_SIZE = 32
+EMBED_DIM      = 192   # Swin-Tiny stage 1 dim; stage 0 dim=96 (before PatchMerging doubles channels)
+DEPTHS         = [2, 6]  # Swin-Tiny standard per-stage depth (Swin-L=[2,2,18,2])
+NUM_HEADS      = [6, 12] # Scales with embed_dim to keep dim/head=16 constant across stages
+WINDOW_SIZE    = 4       # Matches 32x32 resolution; 8x8->4x4 windows keep computational cost manageable
+PATCH_SIZE     = 4       # Swin-Tiny standard; 32/4=8x8 initial token grid (vs ViT-S=64 tokens)
+MLP_RATIO      = 4.0     # FFN expansion ratio; standard across transformer literature
+DROP_PATH_RATE = 0.1     # Linear stochastic depth schedule from 0 to 0.1 over all blocks
+INPUT_SIZE     = 32      # CIFAR-100 resolution
 
 N_PATCHES_H = INPUT_SIZE // PATCH_SIZE   # 8
 N_PATCHES_W = INPUT_SIZE // PATCH_SIZE   # 8
@@ -27,7 +27,7 @@ N_PATCHES_W = INPUT_SIZE // PATCH_SIZE   # 8
 # Standard deviation for trunc_normal_ initialization (from "Attention is All You Need")
 _INIT_STD = 0.02
 
-# Attention mask fill values: masked positions get -100 (≈ -inf for softmax), valid get 0
+# Attention mask fill values: masked positions get -100 (~ -inf for softmax), valid get 0
 _ATTN_MASK_PAD = -100.0
 _ATTN_MASK_VALID = 0.0
 
@@ -74,9 +74,9 @@ class WindowAttention(nn.Module):
 
     def __init__(self, dim: int, num_heads: int, window_size: int) -> None:
         super().__init__()
-        self.num_heads = num_heads
+        self.num_heads   = num_heads
         self.window_size = window_size
-        self.scale = (dim // num_heads) ** -0.5
+        self.scale       = (dim // num_heads) ** -0.5
 
         ws = window_size
         self.rel_pos_bias_table = nn.Parameter(
@@ -85,7 +85,7 @@ class WindowAttention(nn.Module):
 
         coords_h = torch.arange(ws)
         coords_w = torch.arange(ws)
-        coords = torch.stack(torch.meshgrid(coords_h, coords_w, indexing="ij"))
+        coords   = torch.stack(torch.meshgrid(coords_h, coords_w, indexing="ij"))
         coords_flat = coords.flatten(1)                                     # (2, ws*ws)
         rel = coords_flat[:, :, None] - coords_flat[:, None, :]            # (2, ws*ws, ws*ws)
         rel = rel.permute(1, 2, 0).contiguous()                            # (ws*ws, ws*ws, 2)
@@ -94,7 +94,7 @@ class WindowAttention(nn.Module):
         rel[:, :, 0] *= 2 * ws - 1
         self.register_buffer("rel_pos_index", rel.sum(-1).long())          # (ws*ws, ws*ws)
 
-        self.qkv = nn.Linear(dim, dim * 3, bias=True)
+        self.qkv  = nn.Linear(dim, dim * 3, bias=True)
         self.proj = nn.Linear(dim, dim)
 
     def forward(
@@ -109,25 +109,25 @@ class WindowAttention(nn.Module):
             (B_windows, N, C)
         """
         Bw, N, C = x.shape
-        heads = self.num_heads
+        heads    = self.num_heads
         head_dim = C // heads
 
-        qkv = self.qkv(x).reshape(Bw, N, 3, heads, head_dim).permute(2, 0, 3, 1, 4)
+        qkv     = self.qkv(x).reshape(Bw, N, 3, heads, head_dim).permute(2, 0, 3, 1, 4)
         q, k, v = qkv.unbind(0)                                            # (Bw, heads, N, head_dim)
 
-        attn = (q * self.scale) @ k.transpose(-2, -1)                     # (Bw, heads, N, N)
+        attn = (q * self.scale) @ k.transpose(-2, -1)                      # (Bw, heads, N, N)
 
         bias = self.rel_pos_bias_table[self.rel_pos_index.view(-1)].view(N, N, heads)
         attn = attn + bias.permute(2, 0, 1).unsqueeze(0)
 
         if mask is not None:
             num_wins = mask.shape[0]
-            attn = attn.view(Bw // num_wins, num_wins, heads, N, N)
-            attn = attn + mask.unsqueeze(1).unsqueeze(0)
-            attn = attn.view(-1, heads, N, N)
+            attn     = attn.view(Bw // num_wins, num_wins, heads, N, N)
+            attn     = attn + mask.unsqueeze(1).unsqueeze(0)
+            attn     = attn.view(-1, heads, N, N)
 
         attn = attn.softmax(dim=-1)
-        x = (attn @ v).transpose(1, 2).reshape(Bw, N, C)
+        x    = (attn @ v).transpose(1, 2).reshape(Bw, N, C)
         return self.proj(x)
 
 
@@ -176,9 +176,9 @@ class SwinBlock(nn.Module):
     ) -> None:
         super().__init__()
         self.window_size = window_size
-        self.shift_size = window_size // 2 if shift else 0
+        self.shift_size  = window_size // 2 if shift else 0
 
-        H, W = input_resolution
+        H, W         = input_resolution
         actual_shift = self.shift_size if (H > window_size and W > window_size) else 0
         if actual_shift > 0:
             mask = self._compute_attn_mask(H, W, actual_shift, torch.device("cpu"))
@@ -187,10 +187,10 @@ class SwinBlock(nn.Module):
             self.register_buffer("_attn_mask", None)
 
         self.norm1 = nn.LayerNorm(dim)
-        self.attn = WindowAttention(dim, num_heads, window_size)
+        self.attn  = WindowAttention(dim, num_heads, window_size)
         self.norm2 = nn.LayerNorm(dim)
         mlp_hidden = int(dim * mlp_ratio)
-        self.mlp = nn.Sequential(
+        self.mlp   = nn.Sequential(
             nn.Linear(dim, mlp_hidden),
             nn.GELU(),
             nn.Linear(mlp_hidden, dim),
@@ -209,7 +209,7 @@ class SwinBlock(nn.Module):
         img_mask = torch.zeros(1, H, W, 1, device=device)
         h_slices = (slice(0, -ws), slice(-ws, -shift), slice(-shift, None))
         w_slices = (slice(0, -ws), slice(-ws, -shift), slice(-shift, None))
-        label = 0
+        label    = 0
         for hs in h_slices:
             for ws_ in w_slices:
                 img_mask[:, hs, ws_, :] = label
@@ -227,9 +227,9 @@ class SwinBlock(nn.Module):
             (B, H, W, C)
         """
         B, H, W, C = x.shape
-        ws = self.window_size
         shortcut = x
-        x = self.norm1(x)
+        ws = self.window_size
+        x  = self.norm1(x)
 
         if self._attn_mask is not None:
             x = torch.roll(x, shifts=(-self.shift_size, -self.shift_size), dims=(1, 2))
@@ -239,7 +239,7 @@ class SwinBlock(nn.Module):
         )
         x_wins = window_partition(x, ws).view(-1, ws * ws, C)
         x_wins = self.attn(x_wins, mask=self._attn_mask).view(-1, ws, ws, C)
-        x = window_reverse(x_wins, ws, H, W)
+        x      = window_reverse(x_wins, ws, H, W)
 
         if self._attn_mask is not None:
             x = torch.roll(x, shifts=(self.shift_size, self.shift_size), dims=(1, 2))
@@ -258,7 +258,7 @@ class PatchMerging(nn.Module):
 
     def __init__(self, dim: int) -> None:
         super().__init__()
-        self.norm = nn.LayerNorm(4 * dim)
+        self.norm      = nn.LayerNorm(4 * dim)
         self.reduction = nn.Linear(4 * dim, 2 * dim, bias=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -313,7 +313,7 @@ class SwinTiny32(nn.Module):
         self.patch_embed = PatchEmbed()
 
         total_blocks = sum(DEPTHS)
-        dp_rates = [
+        dp_rates     = [
             DROP_PATH_RATE * i / max(total_blocks - 1, 1) for i in range(total_blocks)
         ]
 
@@ -324,7 +324,7 @@ class SwinTiny32(nn.Module):
         self.stages: nn.ModuleList = nn.ModuleList()
         block_idx = 0
         for stage_idx, (depth, n_heads) in enumerate(zip(DEPTHS, NUM_HEADS)):
-            dim = EMBED_DIM * (2 ** stage_idx)   # 192 for stage 0, 384 for stage 1
+            dim   = EMBED_DIM * (2 ** stage_idx)   # 192 for stage 0, 384 for stage 1
             stage = nn.ModuleList([
                 SwinBlock(
                     dim=dim,
