@@ -12,9 +12,9 @@ import torch
 import torch.nn as nn
 
 
-EMBED_DIM = 96
+EMBED_DIM = 192
 DEPTHS = [2, 6]
-NUM_HEADS = [3, 6]
+NUM_HEADS = [6, 12]
 WINDOW_SIZE = 4
 PATCH_SIZE = 4
 MLP_RATIO = 4.0
