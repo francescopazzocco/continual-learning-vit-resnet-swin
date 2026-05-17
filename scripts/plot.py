@@ -187,6 +187,11 @@ def _agg_matrix(
         and method in cka_data[arch]
         and s in cka_data[arch][method]
     ]
+    if not mats:
+        return None
+    # Discard matrices from partial runs (e.g. smoke-mode 2-task extractions)
+    target = max(set(m.shape for m in mats), key=lambda s: s[0])
+    mats   = [m for m in mats if m.shape == target]
     return np.mean(np.stack(mats, axis=0), axis=0) if mats else None
 
 
