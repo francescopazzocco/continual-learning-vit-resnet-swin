@@ -54,8 +54,8 @@ We'll know we're right when **AA / BWT / AF results show rank ordering differenc
 
 | # | Milestone | Outcome | Status | Plan |
 |---|---|---|---|---|
-| 1 | Infrastructure + pilot | ViT-Small and ResNet-18 train on full CIFAR-100 (joint); confirm ViT ≥ 55% accuracy; data pipeline for Split-CIFAR-100 class-IL verified | **complete** (2026-05-16): ViT 63.70%, ResNet 63.86% — gate passed | `.claude/plans/vit-continual-learning.plan.md` |
-| 1b | Swin-Tiny pilot | Swin-Tiny (adapted for 32×32) trains on full CIFAR-100 (joint); confirm accuracy ≥ 55%; architecture added to data pipeline | **complete** (2026-05-16): Swin 57.34% — gate passed | `.claude/plans/vit-continual-learning.plan.md` |
+| 1 | Infrastructure + pilot | ViT-Small and ResNet-18 train on full CIFAR-100 (joint); confirm ViT ≥ 55% accuracy; data pipeline for Split-CIFAR-100 class-IL verified | **complete** (2026-05-16): ViT 63.70%, ResNet 63.86% — gate passed | `doc/plans/vit-continual-learning.plan.md` |
+| 1b | Swin-Tiny pilot | Swin-Tiny (adapted for 32×32) trains on full CIFAR-100 (joint); confirm accuracy ≥ 55%; architecture added to data pipeline | **complete** (2026-05-16): Swin 57.34% — gate passed | `doc/plans/vit-continual-learning.plan.md` |
 | 2 | CL training runs | All 27 runs complete (3 arch × 3 conditions × 3 seeds × 10 tasks); AA / BWT / AF logged per task per seed | pending | — |
 | 3 | Mechanistic analysis | CKA similarity matrices and L2 weight-drift plots produced per layer type (windowed-attn, global-attn, MLP, LayerNorm, stem/conv) after each task for all three architectures | pending | — |
 | 4 | Report | 6-page report with: intro/related work, experimental setup, quantitative results table, CKA/drift figures, discussion of ranking generalization, conclusion | pending | — |

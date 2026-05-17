@@ -1,6 +1,6 @@
 # Plan: ViT vs ResNet-18 under Continual Learning
 
-**Source PRD**: `.claude/prds/vit-continual-learning.prd.md`
+**Source PRD**: `doc/prd/vit-continual-learning.prd.md`
 **Selected Milestone**: M1b — Swin-Tiny pilot (next pending)
 **Complexity**: Medium
 
