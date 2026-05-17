@@ -34,10 +34,6 @@ _SMOKE_MAX_BATCHES    = 2
 # Minimum value for denominators to avoid division by zero
 _MIN_DIVISOR          = 1
 
-# Attention mask fill values: padded positions get -100 (~ -inf for softmax), valid positions get 0
-_ATTN_MASK_PAD   = -100.0
-_ATTN_MASK_VALID = 0.0
-
 # dtype for the per-task accuracy matrix R
 _R_MATRIX_DTYPE  = np.float32
 
@@ -77,8 +73,8 @@ def _train_task_epoch(
         if max_batches > 0 and i >= max_batches:
             break
 
-        x_orig, y_orig = x.to(device), y.to(device)
-        x_aug, y_aug   = method.prepare_batch(x_orig, y_orig, device)
+        x_gpu, y_gpu = x.to(device), y.to(device)
+        x_aug, y_aug = method.prepare_batch(x_gpu, y_gpu, device)
 
         optimizer.zero_grad()
         with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=use_amp):
@@ -185,6 +181,8 @@ def run_cl(
         torch.backends.cudnn.benchmark = True
         model = torch.compile(model)
 
+    if len(splits) < cfg.n_tasks:
+        print(f"[WARN] Only {len(splits)} splits available, expected {cfg.n_tasks}")
     n_tasks = min(len(splits), cfg.n_tasks)
     if smoke:
         n_tasks = min(n_tasks, 2)

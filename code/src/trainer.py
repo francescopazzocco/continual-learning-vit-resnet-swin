@@ -39,6 +39,7 @@ def train_epoch(
     device: torch.device,
     max_batches: int = _MAX_BATCHES_NO_LIMIT,
     use_amp: bool = False,
+    grad_clip: float = 0.0,
 ) -> float:
     """Run one training epoch, return mean cross-entropy loss.
 
@@ -50,6 +51,7 @@ def train_epoch(
         device: Target device.
         max_batches: If > 0, stop after this many batches (smoke mode).
         use_amp: If True, wrap forward in bfloat16 autocast.
+        grad_clip: Max gradient norm; 0 disables clipping.
 
     Returns:
         Mean loss over processed batches.
@@ -65,6 +67,8 @@ def train_epoch(
         with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=use_amp):
             loss = criterion(model(x), y)
         loss.backward()
+        if grad_clip > 0.0:
+            nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
         total_loss += loss.detach()
         n_batches  += 1
@@ -162,7 +166,8 @@ def fit(
         bar = tqdm(range(n_epochs), desc=f"{arch_name}", unit="epoch")
         for epoch in bar:
             train_loss = train_epoch(
-                model, train_loader, optimizer, criterion, device, max_batches, use_amp
+                model, train_loader, optimizer, criterion, device, max_batches, use_amp,
+                grad_clip=cfg.grad_clip,
             )
             val_acc = eval_epoch(model, val_loader, device, max_batches)
             scheduler.step()

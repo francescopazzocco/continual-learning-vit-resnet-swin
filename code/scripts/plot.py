@@ -38,15 +38,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _RUNS_ROOT     = "results/runs"
 _FEATURES_ROOT = "results/features"
 _FIGURES_ROOT  = "results/figures"
+_PILOT_ROOT    = "results/pilot"
 
 ARCHS   = ["vit", "resnet", "swin"]
 METHODS = ["vanilla", "ewc", "er"]
 SEEDS   = [0, 1, 2]
 METRICS = ["AA", "BWT", "AF"]
 
-# Joint-training upper bound from pilot (best val accuracy, epoch 200).
-# Used as a reference line in the AA subplot and forgetting-curve plots.
-JOINT_ACC: dict[str, float] = {
+# Fallback joint-accuracy values used when pilot CSVs are missing.
+# These are replaced at runtime by _load_joint_acc() if the pilot has been run.
+_JOINT_ACC_FALLBACK: dict[str, float] = {
     "vit":    0.6228,
     "resnet": 0.6431,
     "swin":   0.5734,
@@ -100,6 +101,43 @@ plt.rcParams.update({
     "xtick.labelsize": 9,
     "ytick.labelsize": 9,
 })
+
+
+# ---------------------------------------------------------------------------
+# Joint-accuracy loader
+# ---------------------------------------------------------------------------
+
+def _load_joint_acc() -> dict[str, float]:
+    """Return best val_acc per arch from pilot training logs.
+
+    Reads results/pilot/{arch}_train.csv (written by scripts/pilot.py) and
+    picks the maximum val_acc row.  Falls back to _JOINT_ACC_FALLBACK with a
+    warning for any arch whose CSV is absent or empty.
+
+    Returns:
+        Dict mapping arch name to best joint-training top-1 accuracy.
+    """
+    result: dict[str, float] = dict(_JOINT_ACC_FALLBACK)
+    for arch in ARCHS:
+        path = os.path.join(_PILOT_ROOT, f"{arch}_train.csv")
+        if not os.path.exists(path):
+            print(
+                f"[WARN] Pilot CSV missing for {arch} ({path})"
+                f" -- using fallback {result[arch]:.4f}"
+            )
+            continue
+        with open(path, newline="") as f:
+            rows = list(csv.DictReader(f))
+        if not rows:
+            print(
+                f"[WARN] Pilot CSV empty for {arch} ({path})"
+                f" -- using fallback {result[arch]:.4f}"
+            )
+            continue
+        best = max(float(r["val_acc"]) for r in rows)
+        result[arch] = best
+        print(f"  [OK] joint acc {arch}: {best:.4f}  (from {path})")
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -320,7 +358,8 @@ def _agg_drift(drift_data: Dict, arch: str,
 # Figure 1: metric summary
 # ---------------------------------------------------------------------------
 
-def _plot_metric_summary(metric_data: Dict, out_dir: str) -> None:
+def _plot_metric_summary(metric_data: Dict, out_dir: str,
+                         joint_acc: dict[str, float]) -> None:
     """AA / BWT / AF grouped bar chart with joint-training reference on AA.
 
     The joint upper bound is shown as a short horizontal bar above each arch
@@ -355,7 +394,7 @@ def _plot_metric_summary(metric_data: Dict, out_dir: str) -> None:
         if metric == "AA":
             # Draw joint upper-bound marker for each architecture
             for i, arch in enumerate(ARCHS):
-                jnt = JOINT_ACC[arch]
+                jnt = joint_acc[arch]
                 ax.plot([i - 0.38, i + 0.38], [jnt, jnt],
                         color=_JOINT_COLOR, linewidth=2, linestyle="--",
                         zorder=5)
@@ -460,7 +499,8 @@ def _plot_weight_drift(drift_data: Dict, out_dir: str) -> None:
 # Figure 4: forgetting curves
 # ---------------------------------------------------------------------------
 
-def _plot_forgetting_curves(metric_data: Dict, out_dir: str) -> None:
+def _plot_forgetting_curves(metric_data: Dict, out_dir: str,
+                            joint_acc: dict[str, float]) -> None:
     """Accuracy on task 0 as tasks 1-9 are sequentially trained.
 
     R[i, 0] for i in 0..9: shows the moment forgetting happens and whether
@@ -482,8 +522,8 @@ def _plot_forgetting_curves(metric_data: Dict, out_dir: str) -> None:
         ax.set_ylim(-0.02, 1.02)
 
         # Joint upper bound reference
-        ax.axhline(JOINT_ACC[arch], color=_JOINT_COLOR, linewidth=1.5,
-                   linestyle="--", label=f"Joint ({JOINT_ACC[arch]:.0%})")
+        ax.axhline(joint_acc[arch], color=_JOINT_COLOR, linewidth=1.5,
+                   linestyle="--", label=f"Joint ({joint_acc[arch]:.0%})")
 
         for method in METHODS:
             curve = _extract_r_column(metric_data, arch, method, col=0)
@@ -624,14 +664,15 @@ def main() -> None:
     os.makedirs(args.out_dir, exist_ok=True)
 
     print("=== plot.py ===")
+    joint_acc   = _load_joint_acc()
     metric_data = _load_metrics()
     cka_data    = _load_cka()
     drift_data  = _load_drift()
 
-    _plot_metric_summary(metric_data, args.out_dir)
+    _plot_metric_summary(metric_data, args.out_dir, joint_acc)
     _plot_cka_heatmaps(cka_data, args.out_dir)
     _plot_weight_drift(drift_data, args.out_dir)
-    _plot_forgetting_curves(metric_data, args.out_dir)
+    _plot_forgetting_curves(metric_data, args.out_dir, joint_acc)
     _plot_task_diagonals(metric_data, args.out_dir)
     _plot_layer_drift(args.out_dir)
 

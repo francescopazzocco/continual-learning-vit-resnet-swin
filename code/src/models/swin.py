@@ -13,7 +13,7 @@ import torch.nn as nn
 
 
 EMBED_DIM      = 192   # Swin-Tiny stage 1 dim; stage 0 dim=96 (before PatchMerging doubles channels)
-DEPTHS         = [2, 6]  # Swin-Tiny standard per-stage depth (Swin-L=[2,2,18,2])
+DEPTHS         = [2, 6]  # Adapted 2-stage depth for 32x32 (original Swin-Tiny is [2,2,6,2] over 4 stages)
 NUM_HEADS      = [6, 12] # Scales with embed_dim to keep dim/head=16 constant across stages
 WINDOW_SIZE    = 4       # Matches 32x32 resolution; 8x8->4x4 windows keep computational cost manageable
 PATCH_SIZE     = 4       # Swin-Tiny standard; 32/4=8x8 initial token grid (vs ViT-S=64 tokens)
@@ -27,9 +27,8 @@ N_PATCHES_W = INPUT_SIZE // PATCH_SIZE   # 8
 # Standard deviation for trunc_normal_ initialization (from "Attention is All You Need")
 _INIT_STD = 0.02
 
-# Attention mask fill values: masked positions get -100 (~ -inf for softmax), valid get 0
+# Additive mask value for blocked attention positions (~-inf for softmax)
 _ATTN_MASK_PAD = -100.0
-_ATTN_MASK_VALID = 0.0
 
 
 def window_partition(x: torch.Tensor, ws: int) -> torch.Tensor:

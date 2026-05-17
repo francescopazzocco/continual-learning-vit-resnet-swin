@@ -21,7 +21,7 @@ class Config:
     # Training (joint pilot)
     epochs:     int = 200       # Standard for CIFAR training with cosine LR (He et al., ResNet)
     batch_size: int = 128       # Standard; fits on GPU memory with ViT-Small (384-dim)
-    lr:       float = 0.1       # Standard SGD learning rate (Krizhevsky; Loshchilov & Hutter)
+    lr:       float = 0.1       # Empirically tuned; standard SGD starting point for CIFAR
     momentum: float = 0.9       # SGD momentum; standard across literature (Ioffe & Szegedy)
     wd:       float = 5e-4      # Weight decay; standard for CIFAR (He et al., "Delving Deep")
 
@@ -51,3 +51,8 @@ class Config:
 
     def __post_init__(self) -> None:
         self.n_classes = self.n_tasks * self.classes_per_task
+        if self.n_classes != 100:
+            raise ValueError(
+                f"n_tasks * classes_per_task must equal 100 for Split-CIFAR-100 "
+                f"(got {self.n_tasks} * {self.classes_per_task} = {self.n_classes})"
+            )
