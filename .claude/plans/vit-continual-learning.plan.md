@@ -262,7 +262,9 @@ python scripts/plot.py
 
 - [x] M1: Both ViT and ResNet train on full CIFAR-100; smoke tests pass; accuracy gate passed
 - [x] M1b: Swin-Tiny smoke test passes; full pilot reaches ≥55% on CIFAR-100; `swin_best.pt` written to `results/pilot/` — 57.34% (2026-05-16)
-- [ ] M2: All 27 runs complete; each `results/runs/{run}/` has `metrics.csv` + `train_log.csv` + 10 ckpts
-- [ ] M3: `results/features/` has `cka.npz` + `drift.npz` per run; `results/figures/` populated
-- [ ] Smoke tests pass for all scripts with `--arch all` / `--arch swin`
+- [x] M2: All 27 runs complete; each `results/runs/{run}/` has `metrics.csv` + `train_log.csv` + 10 ckpts (2026-05-17)
+- [x] M3: `results/features/` has `cka.npz` + `drift.npz` per run; `results/figures/` populated (2026-05-17)
+- [x] Smoke tests pass for all scripts with `--arch all` / `--arch swin`
 - [ ] No HuggingFace weights; no pretrained torchvision weights; PyTorch only
+- [x] Task-IL oracle: `scripts/eval_task_il.py` written; `results/ablation/task_il.csv` confirms protocol effect (class-IL vs task-IL: ViT 1%→39%, ResNet 9%→80%, Swin 7%→63%) (2026-05-17)
+- [x] Per-layer drift figure: `_plot_layer_drift()` added to `scripts/plot.py`; `results/figures/layer_drift.pdf` generated (2026-05-17)
