@@ -83,6 +83,3 @@ We'll know we're right when **AA / BWT / AF results show rank ordering differenc
 | Swin-Tiny fails accuracy gate on CIFAR-100 32×32 | Medium | High — standard Swin window sizes (7×7) do not fit 32×32 images; requires architectural adaptation (smaller patches, smaller windows, fewer stages) | Adapt window size to 4×4 and patch size to 4×4; validate in milestone 1b joint pilot before CL runs; fallback to Tiny ImageNet applies to all three architectures equally |
 | Swin adds scope / compute beyond course project budget | Low-Medium | Medium — 9 additional runs (~25–30% more GPU hours) | 27 runs still fits overnight on RTX 5070 Ti at 32×32; Swin-Tiny is lightweight (~28M params); course instructors reward ambition when executed cleanly |
 | Report page budget tighter with three architectures | Medium | Low — 6-page limit forces tighter writing | Combine ViT and Swin CKA figures into a single panel; keep ResNet as the CNN baseline anchor; one results table covers all three |
-
----
-*Status: DRAFT — requirements only. Implementation planning pending via /plan.*

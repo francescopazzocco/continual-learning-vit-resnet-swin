@@ -9,8 +9,8 @@ __pycache__/
 .venv/
 
 # Data & results
-/data/
-/results/
+code/data/
+code/results/
 
 # Checkpoints
 *.pt
