@@ -64,6 +64,34 @@ _METHOD_LABELS = {"vanilla": "Vanilla", "ewc": "EWC", "er": "ER"}
 _ARCH_LABELS   = {"vit": "ViT-Small", "resnet": "ResNet-18", "swin": "Swin-Tiny"}
 _JOINT_COLOR   = "#888888"
 
+# Layer groupings for per-layer drift figure: (label, list-of-key-prefixes).
+# A parameter key belongs to a group if it starts with any of the group's prefixes.
+_LAYER_GROUPS: dict[str, list[tuple[str, list[str]]]] = {
+    "vit": [
+        ("stem",       ["stem_"]),
+        ("blocks 0-1", ["blocks_0_", "blocks_1_"]),
+        ("blocks 2-3", ["blocks_2_", "blocks_3_"]),
+        ("blocks 4-5", ["blocks_4_", "blocks_5_"]),
+        ("head",       ["norm_", "head_", "cls_token", "pos_embed"]),
+    ],
+    "resnet": [
+        ("stem",   ["conv1_", "bn1_"]),
+        ("layer1", ["layer1_"]),
+        ("layer2", ["layer2_"]),
+        ("layer3", ["layer3_"]),
+        ("layer4", ["layer4_"]),
+        ("head",   ["fc"]),
+    ],
+    "swin": [
+        ("stem",       ["patch_embed_"]),
+        ("stage0",     ["stages_0_"]),
+        ("merge",      ["patch_merging_"]),
+        ("stage1 0-2", ["stages_1_0_", "stages_1_1_", "stages_1_2_"]),
+        ("stage1 3-5", ["stages_1_3_", "stages_1_4_", "stages_1_5_"]),
+        ("head",       ["norm_", "head_"]),
+    ],
+}
+
 plt.rcParams.update({
     "font.size": 10,
     "axes.titlesize": 11,
@@ -157,6 +185,40 @@ def _load_drift() -> Dict:
                 total  = np.nansum(np.stack(arrays, axis=0), axis=0)
                 drift[arch][method][seed] = total.astype(np.float32)
     return drift
+
+
+def _in_group(key: str, prefixes: List[str]) -> bool:
+    return any(key.startswith(p) for p in prefixes)
+
+
+def _load_layer_drift() -> Dict:
+    """Load per-layer-group L2 drift summed at the final task.
+
+    Returns:
+        Nested dict: layer_drift[arch][method][seed][group_label] = float.
+        NaN parameter drifts (collapsed runs) are excluded from the sum.
+    """
+    result: Dict = defaultdict(lambda: defaultdict(dict))
+    for arch in ARCHS:
+        groups = _LAYER_GROUPS.get(arch, [])
+        for method in METHODS:
+            for seed in SEEDS:
+                path = os.path.join(
+                    _FEATURES_ROOT, _run_name(arch, method, seed), "drift.npz"
+                )
+                if not os.path.exists(path):
+                    continue
+                npz = np.load(path)
+                group_drift: dict[str, float] = {}
+                for label, prefixes in groups:
+                    vals = [
+                        float(npz[k][-1])
+                        for k in npz.files
+                        if _in_group(k, prefixes) and not np.isnan(npz[k][-1])
+                    ]
+                    group_drift[label] = float(np.sum(vals)) if vals else 0.0
+                result[arch][method][seed] = group_drift
+    return result
 
 
 def _extract_r_column(metric_data: Dict, arch: str, method: str,
@@ -485,6 +547,72 @@ def _plot_task_diagonals(metric_data: Dict, out_dir: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Figure 6: per-layer drift
+# ---------------------------------------------------------------------------
+
+def _plot_layer_drift(out_dir: str) -> None:
+    """Per-layer-group L2 drift at the final task, comparing CL methods.
+
+    Drift is summed over all parameters in each layer group at task index 9
+    and averaged over seeds.  Shows which layers are anchored most strongly
+    by each method (mechanistic depth for Section IV-E).
+
+    Layout: 1 row x 3 cols (one per arch).
+    """
+    layer_drift_data = _load_layer_drift()
+
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+    fig.suptitle(
+        "Per-layer group L2 drift at final task (summed within group, mean +/- std, 3 seeds)"
+    )
+
+    bar_w   = 0.22
+    n_meth  = len(METHODS)
+    offsets = np.linspace(-(n_meth - 1) / 2, (n_meth - 1) / 2, n_meth) * bar_w
+
+    for ax, arch in zip(axes, ARCHS):
+        groups       = _LAYER_GROUPS.get(arch, [])
+        group_labels = [g[0] for g in groups]
+        n_groups     = len(group_labels)
+        x            = np.arange(n_groups)
+
+        ax.set_title(_ARCH_LABELS[arch])
+        ax.set_ylabel("$\\|\\Delta W\\|_2$")
+        ax.set_xticks(x)
+        ax.set_xticklabels(group_labels, rotation=30, ha="right", fontsize=8)
+
+        for off, method in zip(offsets, METHODS):
+            seed_vals: List[List[float]] = []
+            for seed in SEEDS:
+                if (arch not in layer_drift_data
+                        or method not in layer_drift_data[arch]
+                        or seed not in layer_drift_data[arch][method]):
+                    continue
+                gd = layer_drift_data[arch][method][seed]
+                seed_vals.append([gd.get(lbl, 0.0) for lbl in group_labels])
+            if not seed_vals:
+                continue
+            arr   = np.array(seed_vals, dtype=np.float32)
+            means = arr.mean(axis=0)
+            stds  = arr.std(axis=0)
+            ax.bar(
+                x + off, means, bar_w,
+                yerr=stds, capsize=3,
+                color=_METHOD_COLORS[method],
+                label=_METHOD_LABELS[method],
+                error_kw={"elinewidth": 1},
+            )
+
+        ax.legend(fontsize=8)
+
+    plt.tight_layout()
+    path = os.path.join(out_dir, "layer_drift.pdf")
+    fig.savefig(path, bbox_inches="tight")
+    print(f"  -> {path}")
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -505,6 +633,7 @@ def main() -> None:
     _plot_weight_drift(drift_data, args.out_dir)
     _plot_forgetting_curves(metric_data, args.out_dir)
     _plot_task_diagonals(metric_data, args.out_dir)
+    _plot_layer_drift(args.out_dir)
 
     print("=== done ===")
 
