@@ -26,10 +26,10 @@ intervals across seeds.
 
 | Dimension | Choice |
 |---|---|
-| Architectures | ViT-Small from scratch (conv stem, 6 blocks, 384-dim), ResNet-18 (`weights=None`) |
+| Architectures | ViT-Small from scratch (conv stem, 6 blocks, 384-dim), ResNet-18 (`weights=None`), Swin-Tiny (2 stages, patch=4, window=4) |
 | CL methods | Vanilla fine-tuning, EWC (online, diagonal Fisher), Experience Replay (reservoir, 500) |
 | Benchmark | Class-incremental Split-CIFAR-100: 10 tasks x 10 classes, single 100-class head |
-| Seeds | 3 (0, 1, 2) — 18 total runs |
+| Seeds | 3 (0, 1, 2) — 27 total runs |
 | Metrics | Average Accuracy (AA), Backward Transfer (BWT), Forgetting (AF) |
 | Mechanistic | Layer-wise linear CKA similarity + L2 weight drift per layer type |
 
@@ -48,6 +48,12 @@ uv pip install -r requirements.txt   # cu132 nightly — RTX 5070 Ti (Blackwell)
 Requires PyTorch >= 2.7 with CUDA 13.2. Adjust the `--extra-index-url` in
 `requirements.txt` for other CUDA versions.
 
+All scripts run from the `code/` subdirectory:
+
+```bash
+cd code
+```
+
 ---
 
 ## Usage
@@ -55,6 +61,7 @@ Requires PyTorch >= 2.7 with CUDA 13.2. Adjust the `--extra-index-url` in
 ### Smoke tests (run first, ~30 seconds, CPU)
 
 ```bash
+cd code
 python scripts/pilot.py --smoke
 python scripts/run_cl.py --smoke
 ```
@@ -65,23 +72,23 @@ passes before launching a full run.
 ### M1 — Joint-training pilot
 
 ```bash
-source .venv/bin/activate && python scripts/pilot.py 2>&1 | tee logs/pilot.log
+cd code && source ../.venv/bin/activate && python scripts/pilot.py 2>&1 | tee ../logs/pilot.log
 ```
 
-Trains both architectures on full CIFAR-100 (joint, 200 epochs). Exits with code 1
-and a dataset-fallback message if ViT top-1 accuracy < 55%.
+Trains all three architectures on full CIFAR-100 (joint, 200 epochs). Exits with code 1
+and a dataset-fallback message if ViT or Swin top-1 accuracy < 55%.
 
-Writes to `results/runs/pilot/`:
-- `vit_best.pt`, `resnet_best.pt` — best checkpoints
-- `vit_train.csv`, `resnet_train.csv` — per-epoch `epoch, train_loss, val_acc`
+Writes to `results/pilot/`:
+- `vit_best.pt`, `resnet_best.pt`, `swin_best.pt` — best checkpoints
+- `{arch}_train.csv` — per-epoch `epoch, train_loss, val_acc`
 
 ### M2 — CL grid
 
 ```bash
-source .venv/bin/activate && python scripts/run_cl.py 2>&1 | tee logs/run_cl.log
+cd code && source ../.venv/bin/activate && python scripts/run_cl.py 2>&1 | tee ../logs/run_cl.log
 ```
 
-Runs all 18 conditions (2 arch x 3 methods x 3 seeds). Each run writes to
+Runs all 27 conditions (3 arch x 3 methods x 3 seeds). Each run writes to
 `results/runs/{arch}_{method}_s{seed}/`:
 - `ckpt_task{0..9}.pt` — per-task checkpoints (required by M3)
 - `train_log.csv` — `task, epoch, train_loss, val_acc`
@@ -95,7 +102,7 @@ python scripts/run_cl.py --arch vit --method ewc --seed 1 --force
 ### M3a — Feature extraction
 
 ```bash
-source .venv/bin/activate && python scripts/extract.py 2>&1 | tee logs/extract.log
+cd code && source ../.venv/bin/activate && python scripts/extract.py 2>&1 | tee ../logs/extract.log
 ```
 
 Loads task checkpoints, builds (or reuses) `data/probe_set.pt` (500 val samples per
@@ -109,7 +116,7 @@ Process a single run: `python scripts/extract.py --run vit_ewc_s0`
 ### M3b — Plotting
 
 ```bash
-python scripts/plot.py
+cd code && python scripts/plot.py
 ```
 
 Reads only CSV and npz files — no model loading, no GPU. Writes all figures to
@@ -119,8 +126,10 @@ Reads only CSV and npz files — no model loading, no GPU. Writes all figures to
 
 ## Results Layout
 
+All training artifacts live under `code/results/`:
+
 ```
-results/
+code/results/
   runs/               <- training artifacts (GPU-hours; never delete)
     pilot/
     {arch}_{method}_s{seed}/
@@ -137,17 +146,20 @@ output. Only `runs/` is irreplaceable.
 
 ## Source Layout
 
+All source lives under `code/` (paths relative to `code/`):
+
 ```
 src/
   models/vit.py       ViT-Small: conv stem + 6 transformer blocks + CLS head
   models/resnet.py    ResNet-18, weights=None, fc -> Linear(512, n_classes)
-  data/cifar100.py    get_joint_loaders() and get_split_loaders() — original label space
+  models/swin.py      Swin-Tiny: 2 stages, patch=4, window=4, adapted for 32x32
+  data/cifar100.py    get_joint_loaders() and get_split_loaders() -- original label space
   cl/base.py          CLMethod ABC: before_task / after_task / loss hooks
   cl/vanilla.py       No-op pass-through
   cl/ewc.py           Online EWC, diagonal Fisher, 20% subsample
   cl/er.py            ReservoirBuffer(500), reservoir sampling, replay per step
   analysis/cka.py     linear_cka() + between_task_cka() with forward hooks
-  analysis/drift.py   snapshot() / compute_drift() — L2 per named parameter
+  analysis/drift.py   snapshot() / compute_drift() -- L2 per named parameter
   metrics.py          compute_metrics(R) -> AA, BWT, AF
   trainer.py          Joint training loop (pilot)
   cl_trainer.py       Task-iterator CL loop; CLMethod hooks; CSV logging
