@@ -219,8 +219,9 @@ def main() -> None:
         run_names = sorted(os.listdir(_RUNS_ROOT))
 
     if args.smoke:
-        # Keep one run per arch for a minimal sanity check
-        run_names = [r for r in run_names if r.endswith("_s0")][:3]
+        # Keep one vanilla_s0 run per arch for a minimal sanity check
+        smoke_set = [f"{arch}_vanilla_s0" for arch in ("vit", "resnet", "swin")]
+        run_names    = [r for r in smoke_set if r in run_names]
         n_ckpts      = 2
         probe_batches = 1
     else:
