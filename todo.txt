@@ -1,0 +1,45 @@
+EWC lambda cleanup — to do
+
+[ ] 1. Sanity-check the fix
+       Re-run just the ewc_lambda ablation cell (lambda=1000) on current code.
+       Look at train_log.csv -> if no inf/nan at task 1, the bug's gone.
+       If it still NaNs, stop and fix the divergence first.
+
+[ ] 2. Re-run the lambda ablation properly
+       python scripts/ablation_hp.py --target ewc_lambda
+       (ResNet, 3 tasks, 10 epochs -- ~20 min, not the 5h grid)
+       Read the real AA/BWT numbers this time.
+
+[ ] 3. Decide on lambda
+       - If 1000 still looks right -> grid already ran at 1000, retrain NOTHING.
+       - If 1000 is wrong -> note the new value, go to step 4.
+
+[ ] 4. (Only if lambda changed) retrain the EWC arm
+       9 runs: 3 archs x 3 seeds. Vanilla + ER untouched.
+       Then re-run extract.py + plot.py for those 9 only.
+
+[ ] 5. Fix the docs
+       hyperparameter_choices.md + decision_log.md (LOG-009):
+       kill the "short-run artifact / validated by elimination" wording,
+       replace with the real ablation numbers (or honest literature-only
+       justification + "grid runs stable at 1000").
+
+[ ] 6. Audit the rest (read-through, no reruns)
+       Spot-check the other confident claims in results.md against their
+       raw CSVs -- same trick we just used. Catch any other rationalized result.
+
+
+
+  # AI usage
+  The source code in this folder was, in substance, written by a large language
+  model (Anthropic Claude, Opus). The team's role was to decide what to build and
+  what to investigate:
+  - the research question
+  - experimental design
+  - choice of architectures, continual-learning methods
+  - the class-IL evaluation protocol,
+  - the policy for selecting hyperparameters (anchored to literature baselines).
+
+  We reviewed the generated code and verify models outputs.
+  Interpretation of the results was done by the team.
+

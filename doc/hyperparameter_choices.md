@@ -104,26 +104,34 @@ which introduces a different confound.
 
 | ewc_lambda | AA | BWT | AF |
 |---|---|---|---|
-| 100 | 0.134 | -0.359 | 0.359 |
-| 500 | 0.140 | -0.356 | 0.357 |
-| 1000 | 0.033 | -0.140 | 0.140 |
-| 5000 | 0.033 | -0.140 | 0.140 |
+| 100 | 0.234 | -0.650 | 0.650 |
+| 500 | 0.229 | -0.631 | 0.631 |
+| 1000 | 0.219 | -0.624 | 0.624 |
+| 5000 | 0.204 | -0.606 | 0.606 |
 
-**Interpretation**: There is a sharp phase transition between lambda=500 and
-lambda=1000. Below 500, BWT is severe (-0.36), identical to vanilla fine-tuning
-— the regularization is too weak to protect against forgetting. At lambda=1000
-and 5000, BWT improves markedly (-0.14), but AA collapses to 3.3%.
+**Note on a discarded prior run**: an earlier version of this ablation ran on
+the pre-fix code path and diverged to inf/nan at lambda=1000 (see LOG-013),
+producing degenerate near-chance metrics (AA approx 0.033 = 1/30 for the 3-task
+ablation). Those numbers were a numerical artifact, not a result, and have been
+replaced. The table above is the corrected ablation on the stabilized code.
 
-The AA collapse at 10 epochs/task is a **known short-run artifact**: EWC
-prevents gradient updates from deviating far from the task-0 optimum, so the
-model needs more epochs to overcome the penalty and learn new tasks. At 10
-epochs the model runs out of time; at 50 epochs (full grid) the same lambda
-provides regularization without blocking convergence. The lambda=1000 and
-lambda=5000 plateau with identical metrics confirms the full-grid behavior is
-lambda-insensitive above 1000 — the choice of 1000 is validated.
+**Interpretation**: The corrected ablation shows a smooth, monotonic
+stability-plasticity tradeoff. Raising lambda lowers AA (0.234 -> 0.204) and
+reduces forgetting (AF 0.650 -> 0.606; BWT -0.650 -> -0.606). There is no phase
+transition and no collapse -- the metrics vary continuously across two orders of
+magnitude of lambda.
 
-The Kirkpatrick et al. value (1000) sits at the BWT-improving knee. Values
-below 500 fail to protect; values above 1000 provide no additional benefit.
+lambda=1000 sits mid-range and behaves as expected. Because the metrics change
+only gradually across 100-5000, the method comparison is insensitive to the
+exact value in this range. lambda=1000 is retained as the fixed,
+literature-standard value (Kirkpatrick et al. 2017; Mirzadeh et al. 2022) rather
+than tuned per-architecture: tuning lambda to maximize AA would select the
+smallest value (100), the regime where EWC barely regularizes, which would
+confound a study whose purpose is to compare methods, not tune them.
+
+**Honest caveat**: even at lambda=5000, BWT remains -0.61 at this 3-task,
+10-epoch ablation scale -- EWC provides only a modest reduction in forgetting
+here. This is reported as an observed limitation, not corrected away.
 
 ---
 
@@ -139,19 +147,19 @@ this scale based on the central limit theorem applied to gradient statistics.
 
 | fisher_subsample | n_images | AA | BWT | AF |
 |---|---|---|---|---|
-| 0.05 | ~250 | 0.033 | -0.140 | 0.140 |
-| 0.10 | ~500 | 0.033 | -0.140 | 0.140 |
-| 0.20 | ~1000 | 0.033 | -0.140 | 0.140 |
-| 0.50 | ~2500 | 0.033 | -0.140 | 0.140 |
+| 0.05 | ~250 | 0.226 | -0.637 | 0.637 |
+| 0.10 | ~500 | 0.220 | -0.627 | 0.627 |
+| 0.20 | ~1000 | 0.223 | -0.622 | 0.622 |
+| 0.50 | ~2500 | 0.224 | -0.615 | 0.615 |
 
-**Interpretation**: All four subsample fractions give identical results.
-At lambda=1000, the EWC penalty is the dominant factor; Fisher estimation
-quality (relative ordering of parameter importance) is stable even at 250
-images (5% subsample). Subsample=0.2 is validated by elimination: it is as
-good as 0.5 (full half-dataset) and no worse than 0.05, while being 2.5x
-faster than 0.5. The identical BWT across all fractions also confirms that
-the diagonal Fisher ordering is robust at this dataset scale — a property
-expected from CLT-convergence of gradient statistics by ~250 samples.
+**Interpretation**: AA is effectively flat across all four fractions
+(0.220-0.226, within noise), and forgetting improves only marginally as the
+subsample grows (AF 0.637 -> 0.615). This is a genuine low-sensitivity result on
+the stabilized code -- the diagonal Fisher ordering is stable down to ~250 images
+(5%), consistent with CLT-convergence of gradient statistics at this scale.
+subsample=0.2 (~1000 images) is indistinguishable from subsample=0.5 in AA while
+costing 2.5x less to compute, so it is retained. The small AF gain at 0.5 does
+not justify doubling Fisher cost across the full 27-run grid.
 
 ---
 
@@ -172,25 +180,26 @@ batch_size=16 is a 16x speedup over per-sample (batch_size=1):
 
 | fisher_batch_size | AA | BWT | AF |
 |---|---|---|---|
-| 1 | 0.033 | -0.140 | 0.140 |
-| 8 | 0.033 | -0.140 | 0.140 |
-| 16 | 0.033 | -0.140 | 0.140 |
-| 64 | 0.129 | -0.324 | 0.324 |
+| 1 | 0.175 | -0.586 | 0.586 |
+| 8 | 0.218 | -0.632 | 0.632 |
+| 16 | 0.223 | -0.632 | 0.632 |
+| 64 | 0.235 | -0.645 | 0.645 |
 
-**Interpretation**: batch_size=1, 8, 16 give identical results, confirming
-that Jensen's underestimation at these batch sizes does not degrade the
-parameter importance ranking enough to affect EWC's protective behavior.
+**Interpretation**: The corrected sweep shows the Jensen-inequality bias exactly
+as predicted, now as a smooth monotonic trend rather than a collapse. Larger
+batches underestimate mean(g^2) more, weakening the effective EWC penalty: AA
+rises (0.175 -> 0.235) and forgetting worsens (AF 0.586 -> 0.645) as batch_size
+grows from 1 to 64. batch_size=1 (unbiased per-sample Fisher) gives the strongest
+regularization -- lowest AA, best forgetting -- confirming it is the most faithful
+estimate.
 
-batch_size=64 breaks the regime: AA rises to 0.129 and BWT degrades to -0.324,
-matching the low-lambda pattern from the ewc_lambda grid. This confirms the
-mechanism: at B=64, param.grad^2 * 64 ≈ 64 * (mean(g))^2 underestimates
-mean(g^2) severely enough to reduce the effective lambda well below 1000.
-The Fisher order is preserved, but the magnitude is too small to provide
-meaningful regularization.
-
-batch_size=16 is validated: it sits comfortably in the stable regime (identical
-to B=1) while providing a 16x reduction in Fisher computation time. Anything
-below 64 is safe; the failure mode at B=64 provides a clear upper bound.
+batch_size=8 and 16 are nearly identical (AA 0.218 vs 0.223; AF identical at
+0.632), forming a stable plateau where the bias is mild. batch_size=16 is retained
+as the speed/bias tradeoff: a 16x reduction in Fisher passes versus batch_size=1
+while sitting in that plateau. The honest cost is that batch_size=16 does trade a
+small amount of EWC strength for speed relative to batch_size=1 -- the bias is real
+but modest, and it is held constant across all architectures, so it does not
+confound the comparison.
 
 ---
 

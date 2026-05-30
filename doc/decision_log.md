@@ -147,3 +147,57 @@ doubles replay storage and may trivially dominate the result, reducing the
 discriminability of the architecture comparison.
 Other direction: 200 exemplars would stress-test ER's lower bound; ablation
 confirms the 500 vs 200 gap in BWT before locking the grid value.
+
+---
+
+## EWC ablation correction
+
+### [LOG-013] ewc_lambda ablation invalidated and re-run; lambda=1000 retained
+The ablation originally cited under LOG-009 (and tabulated in
+doc/hyperparameter_choices.md) was found to be invalid. On the pre-fix code path
+the EWC penalty diverged: at lambda=1000 the task-1 train loss went to inf then
+nan on the first step (results/ablation/ewc_lambda/1000_0/train_log.csv), so
+every high-lambda cell collapsed to near-chance metrics (AA approx 0.033 = 1/30
+for the 3-task ablation). The original writeup rationalized this as a "short-run
+artifact" that would resolve at 50 epochs -- an interpretation that directly
+contradicts the raw train_log (nan weights do not recover with more epochs).
+That interpretation was wrong and has been removed.
+
+After the gradient-stability fix (grad clip; commit b806d40), the ewc_lambda
+sweep was re-run on the stabilized code. The corrected results are monotonic and
+non-degenerate: AA decreases and forgetting decreases as lambda rises
+(lambda=100: AA 0.234, AF 0.650; lambda=5000: AA 0.204, AF 0.606) -- a smooth
+stability-plasticity tradeoff with no phase transition.
+
+Decision: lambda=1000 is retained, now on honest grounds. It is the fixed
+literature-standard value (Kirkpatrick 2017; Mirzadeh 2022), and the corrected
+ablation confirms it is non-pathological and that the comparison is insensitive
+to lambda across 100-5000. No retraining is required: the M2 grid runs already
+used lambda=1000 and show no divergence.
+
+Note: the fisher_subsample and fisher_batch_size sweeps in
+hyperparameter_choices.md ran under the same pre-fix regime (EWC at lambda=1000)
+and are likewise invalid; both are marked [INVALID -- PENDING RE-RUN] and must be
+regenerated on the stabilized code before being cited.
+
+Other direction: tuning lambda to maximize AA would pick lambda=100, the weakest
+regularization regime -- rejected because it confounds a method-comparison study
+and effectively removes the EWC effect being measured.
+
+### [LOG-014] fisher_subsample and fisher_batch_size re-run; both choices stand
+Following LOG-013, the two Fisher sweeps flagged as invalid were re-run on the
+stabilized code. Both are now non-degenerate (no nan; sane AA around 0.18-0.23).
+
+fisher_subsample: AA is flat across 0.05-0.50 (0.220-0.226) with only a marginal
+AF improvement at larger fractions -- a genuine low-sensitivity result. 0.2 is
+retained: indistinguishable from 0.5 in AA at 2.5x lower cost.
+
+fisher_batch_size: the Jensen-inequality bias appears as predicted, as a smooth
+monotonic trend -- larger batch underestimates the Fisher more, weakening
+effective EWC (AA 0.175 -> 0.235, AF 0.586 -> 0.645 from B=1 to B=64). B=8 and
+B=16 form a stable plateau. 16 is retained as the speed/bias tradeoff (16x fewer
+passes than B=1); the modest bias is held constant across architectures and does
+not confound the comparison.
+
+No retraining of the grid is implied: these sweeps only inform Fisher-estimation
+settings, which the M2 grid already used (subsample=0.2, batch_size=16).
