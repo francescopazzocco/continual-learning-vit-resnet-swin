@@ -1,4 +1,4 @@
-"""Unit tests for the four core components identified as untested.
+"""Unit tests for the four core components
 
 Run from code/ with:
     pytest tests/test_core.py -v

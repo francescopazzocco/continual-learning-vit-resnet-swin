@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset
 
@@ -36,11 +37,13 @@ class EWC(CLMethod):
     def __init__(
         self, ewc_lambda: float, fisher_subsample: float,
         fisher_batch_size: int, device: torch.device,
+        num_workers: int = 0,
     ) -> None:
         self.ewc_lambda         = ewc_lambda
         self.fisher_subsample   = fisher_subsample
         self.fisher_batch_size  = fisher_batch_size
         self.device             = device
+        self.num_workers        = num_workers
         # Accumulated diagonal Fisher; populated after the first after_task call.
         self._fisher: dict[str, torch.Tensor] = {}
         # Consolidated parameter snapshot at the most recent after_task call.
@@ -94,7 +97,7 @@ class EWC(CLMethod):
             Subset(dataset, indices.tolist()),
             batch_size=self.fisher_batch_size,
             shuffle=False,
-            num_workers=0,
+            num_workers=self.num_workers,
         )
 
         n_seen = 0

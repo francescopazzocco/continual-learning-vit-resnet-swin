@@ -25,19 +25,19 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 
 from configs.default import Config
-from src.data.cifar100 import get_split_loaders
-from src.models.resnet import get_resnet18
-from src.cl.ewc import EWC
-from src.cl.er import ER
+from src.cl import build_method
 from src.cl_trainer import run_cl
+from src.data.cifar100 import get_split_loaders
 from src.metrics import compute_metrics
+from src.models import build_model
+from src.runtime import set_seed, setup_device
 
 # Ablation protocol -- intentionally below full-grid values to keep wall time short.
 # 3 tasks gives 2 BWT observations (R[1,0] and R[2,{0,1}]).
 # 10 epochs/task is enough for convergence signal at 5x the speed of the 50-epoch grid.
-_ABL_N_TASKS  = 3
-_ABL_N_EPOCHS = 10
-_ABL_SEED     = 0
+_ABL_N_TASKS     = 3
+_ABL_N_EPOCHS    = 10
+_ABL_SEED        = 0
 _SMOKE_N_TASKS   = 2
 _SMOKE_N_EPOCHS  = 1
 _SMOKE_MAX_BATCH = 2
@@ -59,27 +59,6 @@ _HP_METHOD: dict[str, str] = {
 }
 
 _CSV_FIELDS = ["hp", "value", "AA", "BWT", "AF"]
-
-
-def _build_method(method: str, cfg: Config, device: torch.device) -> EWC | ER:
-    """Instantiate the CL method for an ablation cell.
-
-    Args:
-        method: "ewc" or "er".
-        cfg: Config with the HP under test already applied.
-        device: Training device.
-
-    Returns:
-        Configured CLMethod instance.
-    """
-    if method == "ewc":
-        return EWC(
-            ewc_lambda=cfg.ewc_lambda,
-            fisher_subsample=cfg.fisher_subsample,
-            fisher_batch_size=cfg.fisher_batch_size,
-            device=device,
-        )
-    return ER(buffer_size=cfg.er_buffer_size, device=device)
 
 
 def _run_cell(
@@ -118,8 +97,8 @@ def _run_cell(
     setattr(cfg, hp_name, val)
 
     method_name = _HP_METHOD[hp_name]
-    method      = _build_method(method_name, cfg, device)
-    model       = get_resnet18(n_classes=cfg.n_classes)
+    method      = build_method(method_name, cfg, device)
+    model       = build_model("resnet", cfg.n_classes)
 
     label   = str(val).replace(".", "_")
     run_dir = os.path.join(ablation_root, hp_name, label)
@@ -140,10 +119,10 @@ def _ablate_hp(
     """Run the full grid for one HP; print table and return result rows.
 
     Args:
-        hp_name: HP to sweep.
+        hp_name:  HP to sweep.
         cfg_base: Template config.
-        device: Training device.
-        splits: Task splits for the ablation protocol.
+        device:   Training device.
+        splits:   Task splits for the ablation protocol.
         ablation_root: Root directory for output.
         smoke: If True, smoke mode (fast, no meaningful metrics).
 
@@ -164,8 +143,7 @@ def _ablate_hp(
 
     rows = []
     for val in grid:
-        torch.manual_seed(_ABL_SEED)
-        torch.cuda.manual_seed_all(_ABL_SEED)
+        set_seed(_ABL_SEED)
         row = _run_cell(hp_name, val, cfg_base, device, splits, ablation_root, smoke)
         rows.append(row)
         tag = "[SMOKE]" if smoke else ""
@@ -212,17 +190,11 @@ def main() -> None:
     if args.num_workers is not None:
         cfg_base.num_workers = args.num_workers
 
-    torch.set_float32_matmul_precision("high")
-
-    if cfg_base.device == "cuda" and not torch.cuda.is_available():
-        print("[WARN] CUDA not available, falling back to CPU")
-        cfg_base.device = "cpu"
-
-    device = torch.device(cfg_base.device)
+    device = setup_device(cfg_base)
 
     # Load full split loaders once; slice to ablation task count.
     # Seed before loading to keep task-class assignment identical to the full grid.
-    torch.manual_seed(_ABL_SEED)
+    set_seed(_ABL_SEED)
     splits_all = get_split_loaders(cfg_base)
     n_tasks    = _SMOKE_N_TASKS if args.smoke else _ABL_N_TASKS
     splits     = splits_all[:n_tasks]

@@ -21,14 +21,13 @@ import torch
 
 from configs.default import Config
 from src.data.cifar100 import get_joint_loaders
-from src.models.vit import get_vit_small
-from src.models.resnet import get_resnet18
-from src.models.swin import get_swin_tiny
+from src.models import build_model
+from src.runtime import set_seed, setup_device
 from src.trainer import fit
 
 VIT_ACCURACY_GATE = 0.55
 # Architectures that must reach VIT_ACCURACY_GATE or the run exits non-zero.
-_GATED_ARCHS = {"vit", "swin"}
+_GATED_ARCHS      = {"vit", "swin"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,6 +45,18 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def _selected_archs(arg: str) -> list[str]:
+    """Map the --arch flag to the ordered list of architectures to run."""
+    archs: list[str] = []
+    if arg in ("vit", "both", "all"):
+        archs.append("vit")
+    if arg in ("resnet", "both", "all"):
+        archs.append("resnet")
+    if arg in ("swin", "all"):
+        archs.append("swin")
+    return archs
+
+
 def main() -> None:
     args = parse_args()
     cfg = Config()
@@ -61,16 +72,8 @@ def main() -> None:
     if args.num_workers is not None:
         cfg.num_workers = args.num_workers
 
-    # Enable TF32 for all FP32 GEMMs (attention, MLP linears) on Blackwell tensor cores.
-    torch.set_float32_matmul_precision("high")
-
-    # Fall back to CPU if CUDA unavailable
-    if cfg.device == "cuda" and not torch.cuda.is_available():
-        print("[WARN] CUDA not available, falling back to CPU")
-        cfg.device = "cpu"
-
-    torch.manual_seed(cfg.seed)
-    torch.cuda.manual_seed_all(cfg.seed)
+    device = setup_device(cfg)
+    set_seed(cfg.seed)
 
     print(f"=== M1/M1b Pilot | device={cfg.device} | smoke={args.smoke} ===")
     train_loader, val_loader = get_joint_loaders(cfg)
@@ -78,24 +81,17 @@ def main() -> None:
     out_dir = os.path.join(cfg.results_root, "pilot")
     results: dict[str, float] = {}
 
-    runs = []
-    if args.arch in ("vit", "both", "all"):
-        runs.append(("vit", get_vit_small))
-    if args.arch in ("resnet", "both", "all"):
-        runs.append(("resnet", get_resnet18))
-    if args.arch in ("swin", "all"):
-        runs.append(("swin", get_swin_tiny))
-
-    for arch_name, model_fn in runs:
-        model = model_fn(n_classes=cfg.n_classes)
+    for arch_name in _selected_archs(args.arch):
+        model    = build_model(arch_name, cfg.n_classes)
         n_params = sum(p.numel() for p in model.parameters()) / 1e6
         print(f"  [{arch_name}] params: {n_params:.2f}M")
         val_accs = fit(model, train_loader, val_loader, cfg,
                        arch_name=arch_name, out_dir=out_dir, smoke=args.smoke)
         results[arch_name] = max(val_accs)
-        # Free GPU memory before the next architecture.
+        # Free memory before the next architecture.
         del model
-        torch.cuda.empty_cache()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
     print("\n=== Results ===")
     for arch, acc in results.items():

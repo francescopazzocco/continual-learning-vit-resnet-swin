@@ -7,10 +7,11 @@ Template_final_report_ignore_untill_its_time_to_write/
 __pycache__/
 *.py[cod]
 .venv/
+.pytest_cache/
 
-# Data & results
-code/data/
-code/results/
+# Data & results (moved out of code/ to keep it source-only)
+/data/
+/results/
 
 # Checkpoints
 *.pt

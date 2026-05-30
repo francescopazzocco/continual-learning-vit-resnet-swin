@@ -23,54 +23,20 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
 
 from configs.default import Config
+from src.artifacts import CKPT_TEMPLATE, read_scalar_metric
+from src.checkpoint import load_model
 from src.data.cifar100 import get_split_loaders
-from src.models.vit import get_vit_small
-from src.models.resnet import get_resnet18
-from src.models.swin import get_swin_tiny
+from src.models import ARCHS, build_model
+from src.runtime import setup_device
 
-_RUNS_ROOT    = "results/runs"
-_OUT_CSV      = "results/ablation/task_il.csv"
+_RESULTS_ROOT = Config().results_root  # single source of truth for output location
+_RUNS_ROOT    = os.path.join(_RESULTS_ROOT, "runs")
+_OUT_CSV      = os.path.join(_RESULTS_ROOT, "ablation", "task_il.csv")
 _EVAL_SEED    = 0
 _METHOD       = "vanilla"
-_CKPT_TMPL    = "ckpt_task{t}.pt"
 _CSV_FIELDS   = ["arch", "class_il_aa", "task_il_aa"]
-
-
-_COMPILED_PREFIX = "_orig_mod."
-
-
-def _strip_compiled_prefix(state_dict: dict) -> dict:
-    """Remove torch.compile wrapper prefix from checkpoint keys."""
-    return {
-        (k[len(_COMPILED_PREFIX):] if k.startswith(_COMPILED_PREFIX) else k): v
-        for k, v in state_dict.items()
-    }
-
-
-def _build_model(arch: str, n_classes: int) -> nn.Module:
-    if arch == "vit":
-        return get_vit_small(n_classes=n_classes)
-    if arch == "swin":
-        return get_swin_tiny(n_classes=n_classes)
-    return get_resnet18(n_classes=n_classes)
-
-
-def _load_class_il_aa(arch: str) -> float:
-    """Read AA from metrics.csv of the vanilla_s0 run."""
-    path = os.path.join(
-        _RUNS_ROOT, f"{arch}_{_METHOD}_s{_EVAL_SEED}", "metrics.csv"
-    )
-    if not os.path.exists(path):
-        return float("nan")
-    with open(path, newline="") as f:
-        for row in csv.DictReader(f):
-            if row["metric"] == "AA":
-                return float(row["value"])
-    return float("nan")
 
 
 @torch.no_grad()
@@ -105,14 +71,13 @@ def _eval_task_il(
     per_task_acc: list[float] = []
 
     for t, (_, val_loader) in enumerate(splits):
-        ckpt_path = os.path.join(run_dir, _CKPT_TMPL.format(t=t))
+        ckpt_path = os.path.join(run_dir, CKPT_TEMPLATE.format(t=t))
         if not os.path.exists(ckpt_path):
             per_task_acc.append(float("nan"))
             continue
 
-        model = _build_model(arch, cfg.n_classes).to(device)
-        ckpt  = torch.load(ckpt_path, map_location=device, weights_only=False)
-        model.load_state_dict(_strip_compiled_prefix(ckpt["model"]))
+        model = build_model(arch, cfg.n_classes).to(device)
+        load_model(model, ckpt_path)
         model.eval()
 
         lo = t * cfg.classes_per_task
@@ -121,10 +86,10 @@ def _eval_task_il(
         correct = 0
         total   = 0
         for x, y in val_loader:
-            x, y = x.to(device), y.to(device)
-            logits = model(x)                        # (B, 100)
-            masked = logits[:, lo:hi]                # (B, 10)
-            preds  = masked.argmax(dim=1) + lo       # shift back to global space
+            x, y     = x.to(device), y.to(device)
+            logits   = model(x)                        # (B, 100)
+            masked   = logits[:, lo:hi]                # (B, 10)
+            preds    = masked.argmax(dim=1) + lo       # shift back to global space
             correct += (preds == y).sum().item()
             total   += y.size(0)
 
@@ -137,27 +102,22 @@ def _eval_task_il(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Task-IL oracle evaluation")
     parser.add_argument("--device", default=None)
-    args = parser.parse_args()
+    args   = parser.parse_args()
 
-    cfg = Config()
+    cfg    = Config()
     if args.device is not None:
         cfg.device = args.device
-    if cfg.device == "cuda" and not torch.cuda.is_available():
-        print("[WARN] CUDA not available, falling back to CPU")
-        cfg.device = "cpu"
-    device = torch.device(cfg.device)
-
-    torch.set_float32_matmul_precision("high")
+    device = setup_device(cfg)
 
     # Shared split loaders (val sets only used)
     cfg.seed = _EVAL_SEED
-    splits = get_split_loaders(cfg)
+    splits   = get_split_loaders(cfg)
 
-    archs = ["vit", "resnet", "swin"]
-    rows: list[dict] = []
+    archs = ARCHS
+    rows  = []
 
-    print("=== Task-IL oracle evaluation ===")
-    print(f"  checkpoint: {_CKPT_TMPL}  method: {_METHOD}  seed: {_EVAL_SEED}")
+    print("=== Task-IL ===")
+    print(f"  checkpoint: {CKPT_TEMPLATE}  method: {_METHOD}  seed: {_EVAL_SEED}")
     print()
     print(f"  {'arch':<10}  {'class-IL AA':>12}  {'task-IL AA':>12}")
     print("  " + "-" * 38)
@@ -168,7 +128,7 @@ def main() -> None:
             print(f"  [SKIP] {arch}: run directory not found at {run_dir}")
             continue
 
-        class_il = _load_class_il_aa(arch)
+        class_il = read_scalar_metric(run_dir, "AA")
         task_il  = _eval_task_il(arch, run_dir, splits, cfg, device)
 
         print(f"  {arch:<10}  {class_il:>12.4f}  {task_il:>12.4f}")

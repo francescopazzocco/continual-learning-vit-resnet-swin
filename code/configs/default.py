@@ -29,21 +29,21 @@ class Config:
     epochs_per_task: int = 50   # Per-task budget (total 500 epochs = 10 tasks) -- less than joint
 
     # EWC
-    ewc_lambda: float       = 1000.0  # Kirkpatrick et al. (2017) baseline; validated by ablation (doc/hyperparameter_choices.md)
+    ewc_lambda:       float = 1000.0  # Kirkpatrick et al. (2017) baseline; validated by ablation (doc/hyperparameter_choices.md)
     fisher_subsample: float = 0.2     # 20% of train set (~1000 imgs/task); ablation confirms stable estimates vs 0.05-0.5
-    fisher_batch_size: int  = 16      # Batch Fisher (16x speedup vs per-sample); Jensen underestimate, but ordering preserved
+    fisher_batch_size:  int = 16      # Batch Fisher (16x speedup vs per-sample); Jensen underestimate, but ordering preserved
 
     # ER
     er_buffer_size: int = 500   # Reservoir buffer capacity; 5 per class (standard ER protocol)
 
     # Paths
-    data_root:    str = "./data"     # Default CIFAR download directory
-    results_root: str = "./results"  # Output directory for checkpoints, CSVs, figures
+    data_root:    str = "../data"     # CIFAR download dir; outside code/ (run from code/)
+    results_root: str = "../results"  # Checkpoints, CSVs, figures; outside code/ (run from code/)
 
     # Runtime
     device:      str = "cuda"   # Default to GPU; fallback to "cpu" if unavailable
     num_workers: int = 4        # DataLoader parallelism; change according to hardware specs
-    grad_clip:   float = 1.0    # Max gradient norm; required for ViT stability, especially under EWC penalty
+    grad_clip: float = 1.0      # Max gradient norm; required for ViT stability, especially under EWC penalty
 
     # Augmentation
     randaug_n: int = 2          # RandAugment num_ops=2 (Cubuk et al., 2020 standard)

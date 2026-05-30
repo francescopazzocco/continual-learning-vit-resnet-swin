@@ -1,4 +1,8 @@
-"""Joint training loop used by the M1 pilot."""
+"""Joint training loop used by the M1 pilot.
+
+Joint training is continual learning with a single task and no anti-forgetting
+mechanism, so it reuses src.engine via the Vanilla method.
+"""
 
 from __future__ import annotations
 
@@ -14,95 +18,14 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from configs.default import Config
+from src.cl.vanilla import Vanilla
+from src.engine import MAX_BATCHES_NO_LIMIT, SMOKE_MAX_BATCHES, evaluate, train_one_epoch
 
 SAVE_FILENAME = "{arch}_best.pt"
 LOG_FILENAME = "{arch}_train.csv"
 
-# Default sentinel for "no batch limit" (used by max_batches parameter)
-_MAX_BATCHES_NO_LIMIT = -1
-
-# Number of batches per epoch in smoke mode
-_SMOKE_MAX_BATCHES    = 2
-
-# Minimum value for denominators to avoid division by zero
-_MIN_DIVISOR   = 1
-
 # Initial value for best accuracy tracker
 _BEST_ACC_INIT = 0.0
-
-
-def train_epoch(
-    model: nn.Module,
-    loader: DataLoader,
-    optimizer: torch.optim.Optimizer,
-    criterion: nn.Module,
-    device: torch.device,
-    max_batches: int = _MAX_BATCHES_NO_LIMIT,
-    use_amp: bool = False,
-    grad_clip: float = 0.0,
-) -> float:
-    """Run one training epoch, return mean cross-entropy loss.
-
-    Args:
-        model: The model to train.
-        loader: Training DataLoader.
-        optimizer: Optimizer.
-        criterion: Loss function.
-        device: Target device.
-        max_batches: If > 0, stop after this many batches (smoke mode).
-        use_amp: If True, wrap forward in bfloat16 autocast.
-        grad_clip: Max gradient norm; 0 disables clipping.
-
-    Returns:
-        Mean loss over processed batches.
-    """
-    model.train()
-    total_loss = torch.zeros(1, device=device)
-    n_batches  = 0
-    for i, (x, y) in enumerate(loader):
-        if max_batches > 0 and i >= max_batches:
-            break
-        x, y = x.to(device), y.to(device)
-        optimizer.zero_grad()
-        with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=use_amp):
-            loss = criterion(model(x), y)
-        loss.backward()
-        if grad_clip > 0.0:
-            nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-        optimizer.step()
-        total_loss += loss.detach()
-        n_batches  += 1
-    return (total_loss / max(n_batches, _MIN_DIVISOR)).item()
-
-
-def eval_epoch(
-    model: nn.Module,
-    loader: DataLoader,
-    device: torch.device,
-    max_batches: int = _MAX_BATCHES_NO_LIMIT,
-) -> float:
-    """Evaluate model, return top-1 accuracy.
-
-    Args:
-        model: The model to evaluate.
-        loader: Validation DataLoader.
-        device: Target device.
-        max_batches: If > 0, stop after this many batches (smoke mode).
-
-    Returns:
-        Top-1 accuracy in [0, 1].
-    """
-    model.eval()
-    correct = torch.zeros(1, device=device, dtype=torch.long)
-    total = 0
-    with torch.no_grad():
-        for i, (x, y) in enumerate(loader):
-            if max_batches > 0 and i >= max_batches:
-                break
-            x, y = x.to(device), y.to(device)
-            correct += (model(x).argmax(dim=1) == y).sum()
-            total += y.size(0)
-    return correct.item() / max(total, _MIN_DIVISOR)
 
 
 def fit(
@@ -139,13 +62,13 @@ def fit(
         torch.backends.cudnn.benchmark = True
         model = torch.compile(model)
 
-    criterion = nn.CrossEntropyLoss()
-    optimizer = SGD(
+    method      = Vanilla()
+    optimizer   = SGD(
         model.parameters(), lr=cfg.lr, momentum=cfg.momentum, weight_decay=cfg.wd,
     )
     n_epochs    = 1 if smoke else cfg.epochs
     scheduler   = CosineAnnealingLR(optimizer, T_max=n_epochs)
-    max_batches = _SMOKE_MAX_BATCHES if smoke else _MAX_BATCHES_NO_LIMIT
+    max_batches = SMOKE_MAX_BATCHES if smoke else MAX_BATCHES_NO_LIMIT
 
     if not smoke:
         os.makedirs(out_dir, exist_ok=True)
@@ -165,11 +88,11 @@ def fit(
 
         bar = tqdm(range(n_epochs), desc=f"{arch_name}", unit="epoch")
         for epoch in bar:
-            train_loss = train_epoch(
-                model, train_loader, optimizer, criterion, device, max_batches, use_amp,
+            train_loss = train_one_epoch(
+                model, train_loader, optimizer, method, device, max_batches, use_amp,
                 grad_clip=cfg.grad_clip,
             )
-            val_acc = eval_epoch(model, val_loader, device, max_batches)
+            val_acc = evaluate(model, val_loader, device, max_batches)
             scheduler.step()
 
             val_accs.append(val_acc)

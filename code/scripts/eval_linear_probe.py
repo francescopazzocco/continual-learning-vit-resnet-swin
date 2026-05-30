@@ -31,60 +31,22 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from configs.default import Config
+from src.artifacts import CKPT_TEMPLATE, read_scalar_metric
+from src.checkpoint import load_model
 from src.data.cifar100 import get_split_loaders
-from src.models.vit import get_vit_small
-from src.models.resnet import get_resnet18
-from src.models.swin import get_swin_tiny
+from src.models import ARCHS, build_model, replace_head_with_identity
+from src.runtime import setup_device
 
-_RUNS_ROOT    = "results/runs"
-_OUT_CSV      = "results/ablation/linear_probe.csv"
+_RESULTS_ROOT = Config().results_root  # single source of truth for output location
+_RUNS_ROOT    = os.path.join(_RESULTS_ROOT, "runs")
+_OUT_CSV      = os.path.join(_RESULTS_ROOT, "ablation", "linear_probe.csv")
 _EVAL_SEED    = 0
 _METHOD       = "vanilla"
-_CKPT_TMPL    = "ckpt_task{t}.pt"
 _CSV_FIELDS   = ["arch", "class_il_aa", "probe_aa"]
 
 _PROBE_EPOCHS = 30
 _PROBE_LR     = 1e-2
 _PROBE_BATCH  = 256
-
-_COMPILED_PREFIX = "_orig_mod."
-
-
-def _strip_compiled_prefix(state_dict: dict) -> dict:
-    """Remove torch.compile wrapper prefix from checkpoint keys."""
-    return {
-        (k[len(_COMPILED_PREFIX):] if k.startswith(_COMPILED_PREFIX) else k): v
-        for k, v in state_dict.items()
-    }
-
-
-def _build_model(arch: str, n_classes: int) -> nn.Module:
-    if arch == "vit":
-        return get_vit_small(n_classes=n_classes)
-    if arch == "swin":
-        return get_swin_tiny(n_classes=n_classes)
-    return get_resnet18(n_classes=n_classes)
-
-
-def _freeze_backbone(model: nn.Module, arch: str) -> int:
-    """Replace classification head with Identity and freeze all parameters.
-
-    Args:
-        model: Model with its original head intact (needed for in_features).
-        arch: Architecture name; determines which attribute holds the head.
-
-    Returns:
-        Feature dimension of the frozen backbone output.
-    """
-    if arch == "resnet":
-        feat_dim = model.fc.in_features
-        model.fc = nn.Identity()
-    else:
-        feat_dim = model.head.in_features
-        model.head = nn.Identity()
-    for p in model.parameters():
-        p.requires_grad = False
-    return feat_dim
 
 
 @torch.no_grad()
@@ -122,8 +84,8 @@ def _fit_probe(
     """Train a linear head on pre-extracted features.
 
     Args:
-        feat_dim: Backbone output dimension.
-        train_feats: (N, feat_dim) float tensor on CPU.
+        feat_dim:     Backbone output dimension.
+        train_feats:  (N, feat_dim) float tensor on CPU.
         train_labels: (N,) long tensor in [0, n_classes) on CPU.
         n_classes: Number of probe output classes (classes_per_task = 10).
         device: Training device.
@@ -177,20 +139,6 @@ def _eval_probe(
     return (preds == val_labels).float().mean().item()
 
 
-def _load_class_il_aa(arch: str) -> float:
-    """Read final AA from the vanilla_s0 metrics.csv."""
-    path = os.path.join(
-        _RUNS_ROOT, f"{arch}_{_METHOD}_s{_EVAL_SEED}", "metrics.csv"
-    )
-    if not os.path.exists(path):
-        return float("nan")
-    with open(path, newline="") as f:
-        for row in csv.DictReader(f):
-            if row["metric"] == "AA":
-                return float(row["value"])
-    return float("nan")
-
-
 def _eval_arch(
     arch: str,
     run_dir: str,
@@ -216,16 +164,17 @@ def _eval_arch(
     tasks = splits[:1] if smoke else splits
 
     for t, (train_loader, val_loader) in enumerate(tasks):
-        ckpt_path = os.path.join(run_dir, _CKPT_TMPL.format(t=t))
+        ckpt_path = os.path.join(run_dir, CKPT_TEMPLATE.format(t=t))
         if not os.path.exists(ckpt_path):
             per_task_acc.append(float("nan"))
             continue
 
-        model = _build_model(arch, cfg.n_classes).to(device)
-        ckpt  = torch.load(ckpt_path, map_location=device, weights_only=False)
-        model.load_state_dict(_strip_compiled_prefix(ckpt["model"]))
+        model = build_model(arch, cfg.n_classes).to(device)
+        load_model(model, ckpt_path)
 
-        feat_dim    = _freeze_backbone(model, arch)
+        feat_dim = replace_head_with_identity(model, arch)
+        for p in model.parameters():
+            p.requires_grad = False
         task_offset = t * cfg.classes_per_task
 
         train_feats, train_labels = _extract_features(
@@ -258,17 +207,12 @@ def main() -> None:
     cfg = Config()
     if args.device is not None:
         cfg.device = args.device
-    if cfg.device == "cuda" and not torch.cuda.is_available():
-        print("[WARN] CUDA not available, falling back to CPU")
-        cfg.device = "cpu"
-    device = torch.device(cfg.device)
-
-    torch.set_float32_matmul_precision("high")
+    device = setup_device(cfg)
 
     cfg.seed = _EVAL_SEED
     splits   = get_split_loaders(cfg)
 
-    archs = ["vit"] if args.smoke else ["vit", "resnet", "swin"]
+    archs = ["vit"] if args.smoke else ARCHS
     rows: list[dict] = []
 
     print("=== Linear probe representation eval ===")
@@ -286,7 +230,7 @@ def main() -> None:
             print(f"  [SKIP] {arch}: run directory not found at {run_dir}")
             continue
 
-        class_il = _load_class_il_aa(arch)
+        class_il = read_scalar_metric(run_dir, "AA")
         probe_aa = _eval_arch(arch, run_dir, splits, cfg, device, args.smoke)
 
         print(f"  {arch:<10}  {class_il:>12.4f}  {probe_aa:>12.4f}")

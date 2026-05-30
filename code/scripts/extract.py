@@ -27,7 +27,6 @@ import sys
 import numpy as np
 import torch
 import torchvision.datasets as tv_datasets
-import torchvision.transforms as T
 from torch.utils.data import DataLoader, Subset
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -35,84 +34,33 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from configs.default import Config
 from src.analysis.cka import between_task_cka
 from src.analysis.drift import compute_drift, snapshot
-from src.models.resnet import get_resnet18
-from src.models.swin import get_swin_tiny
-from src.models.vit import get_vit_small
+from src.artifacts import CKPT_TEMPLATE
+from src.checkpoint import load_model
+from src.data.cifar100 import eval_transform
+from src.models import PROBE_LAYERS, build_model
 
 # Number of probe samples taken from task-0 val set for CKA computation
 _PROBE_SAMPLES  = 200
 _PROBE_BATCH_SZ = 50
 
-_RUNS_ROOT     = "results/runs"
-_FEATURES_ROOT = "results/features"
-_CKPT_TEMPLATE = "ckpt_task{t}.pt"
-
-_CIFAR100_MEAN = (0.5071, 0.4867, 0.4408)
-_CIFAR100_STD  = (0.2675, 0.2565, 0.2761)
-
-# Submodule names to probe per architecture.
-# For Swin, '.' in "stages.0.0" resolves via get_submodule to stages[0][0].
-_PROBE_LAYERS: dict[str, list[str]] = {
-    "vit": [
-        "stem",
-        "blocks.0",
-        "blocks.2",
-        "blocks.4",
-        "blocks.5",
-        "norm",
-    ],
-    "resnet": [
-        "layer1",
-        "layer2",
-        "layer3",
-        "layer4",
-    ],
-    "swin": [
-        "patch_embed",
-        "stages.0.0",
-        "stages.0.1",
-        "patch_merging",
-        "stages.1.0",
-        "stages.1.5",
-        "norm",
-    ],
-}
+_RESULTS_ROOT   = Config().results_root  # single source of truth for output location
+_RUNS_ROOT      = os.path.join(_RESULTS_ROOT, "runs")
+_FEATURES_ROOT  = os.path.join(_RESULTS_ROOT, "features")
 
 
-def _build_model(arch: str) -> torch.nn.Module:
-    if arch == "vit":
-        return get_vit_small()
-    if arch == "resnet":
-        return get_resnet18()
-    if arch == "swin":
-        return get_swin_tiny()
-    raise ValueError(f"Unknown arch: {arch!r}")
-
-
-def _load_checkpoint(model: torch.nn.Module, ckpt_path: str) -> None:
-    """Load checkpoint into model, stripping torch.compile _orig_mod. prefix."""
-    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True)
-    sd   = {k.replace("_orig_mod.", "", 1): v for k, v in ckpt["model"].items()}
-    model.load_state_dict(sd, strict=True)
-
-
-def _get_probe_loader(data_root: str, n_samples: int) -> DataLoader:
+def _get_probe_loader(data_root: str, n_samples: int, num_workers: int) -> DataLoader:
     """Return a DataLoader over the first n_samples of task-0 val images.
 
     Task 0 covers CIFAR-100 classes 0-9. Using val-set images (no augment)
     ensures the probe data is fixed and independent of training randomness.
     """
-    transform = T.Compose([
-        T.ToTensor(),
-        T.Normalize(mean=_CIFAR100_MEAN, std=_CIFAR100_STD),
-    ])
     ds      = tv_datasets.CIFAR100(root=data_root, train=False, download=False,
-                                    transform=transform)
+                                    transform=eval_transform())
     targets = torch.tensor(ds.targets)
     indices = ((targets >= 0) & (targets < 10)).nonzero(as_tuple=True)[0].tolist()
     indices = indices[:n_samples]
     return DataLoader(Subset(ds, indices), batch_size=_PROBE_BATCH_SZ,
-                      shuffle=False, num_workers=2)
+                      shuffle=False, num_workers=num_workers)
 
 
 def _process_run(
@@ -131,8 +79,8 @@ def _process_run(
         n_ckpts: Maximum number of checkpoints to load (smoke uses 2).
         probe_batches: Batches per model for CKA collection (-1 = all).
     """
-    run_dir  = os.path.join(_RUNS_ROOT, run_name)
-    feat_dir = os.path.join(_FEATURES_ROOT, run_name)
+    run_dir   = os.path.join(_RUNS_ROOT, run_name)
+    feat_dir  = os.path.join(_FEATURES_ROOT, run_name)
 
     cka_out   = os.path.join(feat_dir, "cka.npz")
     drift_out = os.path.join(feat_dir, "drift.npz")
@@ -141,18 +89,18 @@ def _process_run(
         return
 
     arch = run_name.split("_")[0]
-    if arch not in _PROBE_LAYERS:
+    if arch not in PROBE_LAYERS:
         print(f"  [FAIL] {run_name}: unknown arch '{arch}'")
         return
 
-    layer_names = _PROBE_LAYERS[arch]
+    layer_names = PROBE_LAYERS[arch]
 
     # Collect available checkpoints
-    ckpt_paths = [
-        os.path.join(run_dir, _CKPT_TEMPLATE.format(t=t))
+    ckpt_paths  = [
+        os.path.join(run_dir, CKPT_TEMPLATE.format(t=t))
         for t in range(n_ckpts)
     ]
-    ckpt_paths = [p for p in ckpt_paths if os.path.exists(p)]
+    ckpt_paths  = [p for p in ckpt_paths if os.path.exists(p)]
     if not ckpt_paths:
         print(f"  [FAIL] {run_name}: no checkpoints found")
         return
@@ -164,8 +112,8 @@ def _process_run(
     models: list[torch.nn.Module] = []
     snapshots: list[dict] = []
     for path in ckpt_paths:
-        m = _build_model(arch)
-        _load_checkpoint(m, path)
+        m = build_model(arch)
+        load_model(m, path)
         snapshots.append(snapshot(m))
         models.append(m)
 
@@ -213,23 +161,21 @@ def main() -> None:
 
     device = torch.device(args.device)
 
-    if args.runs is not None:
-        run_names = args.runs
-    else:
-        run_names = sorted(os.listdir(_RUNS_ROOT))
+    if args.runs is not None: run_names = args.runs
+    else:                     run_names = sorted(os.listdir(_RUNS_ROOT))
 
     if args.smoke:
         # Keep one vanilla_s0 run per arch for a minimal sanity check
-        smoke_set = [f"{arch}_vanilla_s0" for arch in ("vit", "resnet", "swin")]
-        run_names    = [r for r in smoke_set if r in run_names]
-        n_ckpts      = 2
+        smoke_set     = [f"{arch}_vanilla_s0" for arch in ("vit", "resnet", "swin")]
+        run_names     = [r for r in smoke_set if r in run_names]
+        n_ckpts       = 2
         probe_batches = 1
     else:
-        n_ckpts      = Config().n_tasks
+        n_ckpts       = Config().n_tasks
         probe_batches = -1
 
     cfg          = Config()
-    probe_loader = _get_probe_loader(cfg.data_root, _PROBE_SAMPLES)
+    probe_loader = _get_probe_loader(cfg.data_root, _PROBE_SAMPLES, cfg.num_workers)
 
     print(f"=== extract.py | device={device} | runs={len(run_names)} ===")
     for run_name in run_names:

@@ -10,8 +10,8 @@ from torchvision import datasets, transforms
 
 from configs.default import Config
 
-_CIFAR100_MEAN = (0.5071, 0.4867, 0.4408)
-_CIFAR100_STD  = (0.2675, 0.2565, 0.2761)
+CIFAR100_MEAN = (0.5071, 0.4867, 0.4408)
+CIFAR100_STD  = (0.2675, 0.2565, 0.2761)
 
 # RandomCrop padding for CIFAR images (standard augmentation per paper)
 _RANDOM_CROP_PADDING = 4
@@ -23,14 +23,15 @@ def _train_transform(cfg: Config) -> transforms.Compose:
         transforms.RandomHorizontalFlip(),
         transforms.RandAugment(num_ops=cfg.randaug_n, magnitude=cfg.randaug_m),
         transforms.ToTensor(),
-        transforms.Normalize(mean=_CIFAR100_MEAN, std=_CIFAR100_STD),
+        transforms.Normalize(mean=CIFAR100_MEAN, std=CIFAR100_STD),
     ])
 
 
-def _val_transform() -> transforms.Compose:
+def eval_transform() -> transforms.Compose:
+    """Return the deterministic (no-augment) transform used for val/probe data."""
     return transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize(mean=_CIFAR100_MEAN, std=_CIFAR100_STD),
+        transforms.Normalize(mean=CIFAR100_MEAN, std=CIFAR100_STD),
     ])
 
 
@@ -43,7 +44,7 @@ def get_joint_loaders(cfg: Config) -> Tuple[DataLoader, DataLoader]:
     )
     val_ds  = datasets.CIFAR100(
         root=cfg.data_root, train=False, download=True,
-        transform=_val_transform(),
+        transform=eval_transform(),
     )
     train_loader = DataLoader(
         train_ds, batch_size=cfg.batch_size, shuffle=True,
@@ -70,7 +71,7 @@ def get_split_loaders(cfg: Config) -> List[Tuple[DataLoader, DataLoader]]:
     )
     val_ds  = datasets.CIFAR100(
         root=cfg.data_root, train=False, download=True,
-        transform=_val_transform(),
+        transform=eval_transform(),
     )
 
     pin = cfg.device == "cuda"

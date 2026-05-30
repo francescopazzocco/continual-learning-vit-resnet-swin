@@ -7,121 +7,27 @@ import os
 from typing import List, Tuple
 
 import numpy as np
-import torch
 import torch.nn as nn
 from torch.optim import SGD
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import torch
 
 from configs.default import Config
+from src.artifacts import CKPT_TEMPLATE, METRICS_FILE, TRAIN_LOG_FILE
 from src.cl.base import CLMethod
+from src.engine import MAX_BATCHES_NO_LIMIT, SMOKE_MAX_BATCHES, evaluate, train_one_epoch
 from src.metrics import compute_metrics
-
-TRAIN_LOG_FILE = "train_log.csv"
-METRICS_FILE   = "metrics.csv"
-CKPT_TEMPLATE  = "ckpt_task{t}.pt"
 
 _TRAIN_LOG_FIELDS = ["task", "epoch", "train_loss", "val_acc"]
 _METRICS_FIELDS   = ["metric", "value"]
-
-# Default sentinel for "no batch limit" (used by max_batches parameter)
-_MAX_BATCHES_NO_LIMIT = -1
-
-# Number of batches per epoch in smoke mode
-_SMOKE_MAX_BATCHES    = 2
-
-# Minimum value for denominators to avoid division by zero
-_MIN_DIVISOR          = 1
 
 # dtype for the per-task accuracy matrix R
 _R_MATRIX_DTYPE  = np.float32
 
 # Decimal precision for metrics CSV output
 _METRICS_PRECISION = 6
-
-
-def _train_task_epoch(
-    model: nn.Module,
-    loader: DataLoader,
-    optimizer: torch.optim.Optimizer,
-    method: CLMethod,
-    device: torch.device,
-    max_batches: int,
-    use_amp: bool,
-    grad_clip: float = 0.0,
-) -> float:
-    """Train one epoch for a single CL task; return mean batch loss.
-
-    Args:
-        model: Model in train mode.
-        loader: DataLoader for the current task.
-        optimizer: Optimizer instance.
-        method: CLMethod providing prepare_batch, loss, and after_step hooks.
-        device: Training device.
-        max_batches: Stop after this many batches when > 0 (smoke mode).
-        use_amp: If True, wrap forward in bfloat16 autocast.
-
-    Returns:
-        Mean cross-entropy loss over processed batches.
-    """
-    model.train()
-    total_loss = torch.zeros(1, device=device)
-    n_batches  = 0
-
-    for i, (x, y) in enumerate(loader):
-        if max_batches > 0 and i >= max_batches:
-            break
-
-        x_gpu, y_gpu = x.to(device), y.to(device)
-        x_aug, y_aug = method.prepare_batch(x_gpu, y_gpu, device)
-
-        optimizer.zero_grad()
-        with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=use_amp):
-            logits = model(x_aug)
-            loss   = method.loss(logits, y_aug, model)
-        loss.backward()
-        if grad_clip > 0.0:
-            nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-        optimizer.step()
-
-        # Pass original (pre-replay) CPU batch so ER can update its buffer.
-        method.after_step(x, y)
-
-        total_loss += loss.detach()
-        n_batches  += 1
-
-    return (total_loss / max(n_batches, _MIN_DIVISOR)).item()
-
-
-def _eval_task(
-    model: nn.Module,
-    loader: DataLoader,
-    device: torch.device,
-    max_batches: int,
-) -> float:
-    """Return top-1 accuracy on loader.
-
-    Args:
-        model: Model to evaluate.
-        loader: Validation DataLoader.
-        device: Evaluation device.
-        max_batches: Stop after this many batches when > 0.
-
-    Returns:
-        Top-1 accuracy in [0, 1].
-    """
-    model.eval()
-    correct = torch.zeros(1, device=device, dtype=torch.long)
-    total   = 0
-    with torch.no_grad():
-        for i, (x, y) in enumerate(loader):
-            if max_batches > 0 and i >= max_batches:
-                break
-            x, y     = x.to(device), y.to(device)
-            correct += (model(x).argmax(dim=1) == y).sum()
-            total   += y.size(0)
-    return correct.item() / max(total, _MIN_DIVISOR)
 
 
 def _write_metrics(R: np.ndarray, run_dir: str) -> None:
@@ -188,7 +94,7 @@ def run_cl(
         n_tasks = min(n_tasks, 2)
 
     n_epochs    = 1 if smoke else cfg.epochs_per_task
-    max_batches = _SMOKE_MAX_BATCHES if smoke else _MAX_BATCHES_NO_LIMIT
+    max_batches = SMOKE_MAX_BATCHES if smoke else MAX_BATCHES_NO_LIMIT
 
     R = np.zeros((n_tasks, n_tasks), dtype=_R_MATRIX_DTYPE)
 
@@ -223,11 +129,11 @@ def run_cl(
                 leave=False,
             )
             for epoch in bar:
-                train_loss = _train_task_epoch(
+                train_loss = train_one_epoch(
                     model, train_loader, optimizer, method, device, max_batches, use_amp,
                     grad_clip=cfg.grad_clip,
                 )
-                val_acc = _eval_task(model, val_loader, device, max_batches)
+                val_acc = evaluate(model, val_loader, device, max_batches)
                 scheduler.step()
                 bar.set_postfix(loss=f"{train_loss:.4f}", val=f"{val_acc:.4f}")
 
@@ -243,7 +149,7 @@ def run_cl(
 
             for eval_id in range(task_id + 1):
                 _, eval_loader = splits[eval_id]
-                R[task_id, eval_id] = _eval_task(model, eval_loader, device, max_batches)
+                R[task_id, eval_id] = evaluate(model, eval_loader, device, max_batches)
 
             if not smoke:
                 ckpt_path = os.path.join(run_dir, CKPT_TEMPLATE.format(t=task_id))

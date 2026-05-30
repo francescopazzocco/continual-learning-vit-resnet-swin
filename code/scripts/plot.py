@@ -2,8 +2,8 @@
 """Generate all figures from CL run metrics, CKA matrices, and weight-drift arrays.
 
 Reads:
-    results/runs/{arch}_{method}_s{seed}/metrics.csv  -- scalar metrics
-    results/features/{arch}_{method}_s{seed}/cka.npz  -- (T,T) CKA per layer
+    results/runs/{arch}_{method}_s{seed}/metrics.csv   -- scalar metrics
+    results/features/{arch}_{method}_s{seed}/cka.npz   -- (T,T) CKA per layer
     results/features/{arch}_{method}_s{seed}/drift.npz -- (T,) drift per param
 
 Writes (to results/figures/):
@@ -35,14 +35,15 @@ matplotlib.use("Agg")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-_RUNS_ROOT     = "results/runs"
-_FEATURES_ROOT = "results/features"
-_FIGURES_ROOT  = "results/figures"
-_PILOT_ROOT    = "results/pilot"
+from configs.default import Config
+_N_TASKS = Config().n_tasks
+from src.grid import ARCHS, METHODS, SEEDS
 
-ARCHS   = ["vit", "resnet", "swin"]
-METHODS = ["vanilla", "ewc", "er"]
-SEEDS   = [0, 1, 2]
+_RESULTS_ROOT  = Config().results_root  # single source of truth for output location
+_RUNS_ROOT     = os.path.join(_RESULTS_ROOT, "runs")
+_FEATURES_ROOT = os.path.join(_RESULTS_ROOT, "features")
+_FIGURES_ROOT  = os.path.join(_RESULTS_ROOT, "figures")
+_PILOT_ROOT    = os.path.join(_RESULTS_ROOT, "pilot")
 METRICS = ["AA", "BWT", "AF"]
 
 # Fallback joint-accuracy values used when pilot CSVs are missing.
@@ -94,7 +95,7 @@ _LAYER_GROUPS: dict[str, list[tuple[str, list[str]]]] = {
 }
 
 plt.rcParams.update({
-    "font.size": 10,
+    "font.size":      10,
     "axes.titlesize": 11,
     "axes.labelsize": 10,
     "legend.fontsize": 9,
@@ -260,7 +261,7 @@ def _load_layer_drift() -> Dict:
 
 
 def _extract_r_column(metric_data: Dict, arch: str, method: str,
-                      col: int, n_tasks: int = 10) -> np.ndarray:
+                      col: int, n_tasks: int = _N_TASKS) -> np.ndarray:
     """Extract R[0..n_tasks-1, col] averaged over seeds.
 
     R[i, col] is defined only for i >= col; positions i < col are NaN.
@@ -273,7 +274,7 @@ def _extract_r_column(metric_data: Dict, arch: str, method: str,
         if (arch not in metric_data or method not in metric_data[arch]
                 or seed not in metric_data[arch][method]):
             continue
-        row_map = metric_data[arch][method][seed]
+        row_map  = metric_data[arch][method][seed]
         col_vals = [row_map.get(f"R_{i}_{col}", float("nan"))
                     for i in range(n_tasks)]
         curves.append(col_vals)
@@ -283,7 +284,7 @@ def _extract_r_column(metric_data: Dict, arch: str, method: str,
 
 
 def _extract_diagonal(metric_data: Dict, arch: str, method: str,
-                      n_tasks: int = 10) -> np.ndarray:
+                      n_tasks: int = _N_TASKS) -> np.ndarray:
     """Extract mean R[i, i] over seeds.
 
     Returns:
